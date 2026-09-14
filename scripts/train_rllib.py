@@ -13,6 +13,11 @@ import ray
 from nfly.rl.rllib import build_config
 
 
+def _num(x):
+    """numpy scalars -> plain Python numbers for JSON."""
+    return None if x is None else (float(x) if hasattr(x, "__float__") else x)
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--algo", default="PPO", help="PPO | APPO | IMPALA")
@@ -46,8 +51,8 @@ def main() -> None:
     for i in range(1, args.iters + 1):
         r = algo.train()
         er = r.get("env_runners", {})
-        print(json.dumps({"iter": i, "return_mean": er.get("episode_return_mean"), "episodes": er.get("num_episodes"),
-                          "steps": r.get("num_env_steps_sampled_lifetime")}), flush=True)
+        print(json.dumps({"iter": i, "return_mean": _num(er.get("episode_return_mean")), "episodes": _num(er.get("num_episodes")),
+                          "steps": _num(r.get("num_env_steps_sampled_lifetime")), "seconds": _num(r.get("time_this_iter_s"))}), flush=True)
         if i % args.checkpoint_every == 0 or i == args.iters:
             print("checkpoint:", algo.save_to_path(args.out), flush=True)
 

@@ -85,7 +85,7 @@ class Retina(nn.Module):
     def __init__(self, layout: RetinaLayout, split: bool = True, mirror_left: bool = True):
         super().__init__()
         self.side = layout.side
-        self.register_buffer("idx", torch.as_tensor(layout.idx, dtype=torch.long))
+        self.register_buffer("idx", torch.as_tensor(np.array(layout.idx), dtype=torch.long))
         grid = torch.as_tensor(eye_grid(layout, split, mirror_left), dtype=torch.float32)
         self.register_buffer("grid", grid.view(1, 1, -1, 2))
 
