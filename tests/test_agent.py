@@ -174,3 +174,15 @@ def test_mlp_reference_runs_through_simple_trainers():
     returns = train_ppo(agent, venv, PPOConfig(rollout=8, updates=3, minibatch_envs=2, log_every=100), log=lambda *_: None)
     assert isinstance(returns, list)
     venv.close()
+
+
+def test_param_groups_scale_brain_and_heads():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
+    rest, heads, brain = a.param_groups(1e-3, brain_scale=0.1, reference_fan_in=2)
+    assert brain["lr"] == pytest.approx(1e-4) and rest["lr"] == 1e-3
+    assert heads["lr"] == pytest.approx(1e-3 * 2 / a.decoder.n_readout)
+    names = {id(q): n for n, q in a.named_parameters()}
+    assert all(names[id(q)].startswith("brain.") for q in brain["params"])
+    assert all(names[id(q)].startswith(("value.", "decoder.head")) for q in heads["params"])
+    assert sum(len(g["params"]) for g in (rest, heads, brain)) == sum(1 for q in a.parameters() if q.requires_grad)

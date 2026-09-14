@@ -40,13 +40,10 @@ class PPOConfig:
 
 
 def param_groups(agent, lr: float, brain_lr_scale: float) -> list[dict]:
-    """Two Adam groups: brain parameters at lr * brain_lr_scale, everything else at lr."""
-    brain = [q for n, q in agent.named_parameters() if q.requires_grad and n.startswith("brain.")]
-    rest = [q for n, q in agent.named_parameters() if q.requires_grad and not n.startswith("brain.")]
-    groups = [{"params": rest, "lr": lr}]
-    if brain:
-        groups.append({"params": brain, "lr": lr * brain_lr_scale})
-    return groups
+    """Ask the agent for its optimizer groups if it has an opinion (FlyAgent does), else one group."""
+    if hasattr(agent, "param_groups"):
+        return agent.param_groups(lr, brain_scale=brain_lr_scale)
+    return [{"params": [q for q in agent.parameters() if q.requires_grad], "lr": lr}]
 
 
 def train_ppo(agent, venv, cfg: PPOConfig, device="cpu", seed: int = 0, log=None) -> list[float]:

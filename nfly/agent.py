@@ -83,6 +83,30 @@ class FlyAgent(nn.Module):
         """Derived parameters for an unroll; trainers compute this once per replayed segment."""
         return self.brain.weights()
 
+    def param_groups(self, lr: float, brain_scale: float = 0.1, reference_fan_in: int = 64) -> list[dict]:
+        """Optimizer groups with learning rates matched to each part of the agent.
+
+        brain      lr * brain_scale: millions of edge gains under Adam each move by about lr per
+                   update, which shifts the whole network; a smaller step keeps updates in the
+                   trust region.
+        heads      lr * reference_fan_in / fan_in: with Adam the logit shift per update grows
+                   with the number of input features (about 1,300 readout neurons vs 64 in a
+                   small MLP), so the head rate is scaled to give the same shift as a
+                   reference_fan_in-unit network.
+        the rest   lr (encoder projection, input gain, readout normalisation)."""
+        brain, heads, rest = [], [], []
+        for name, q in self.named_parameters():
+            if not q.requires_grad:
+                continue
+            if name.startswith("brain."):
+                brain.append(q)
+            elif name.startswith("value.") or name.startswith("decoder.") and not name.startswith("decoder.norm."):
+                heads.append(q)
+            else:
+                rest.append(q)
+        head_lr = lr * min(1.0, reference_fan_in / self.decoder.n_readout)
+        return [{"params": rest, "lr": lr}, {"params": heads, "lr": head_lr}, {"params": brain, "lr": lr * brain_scale}]
+
     def step(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """One env step: obs (B, ...) and state h (B, N) -> readout features (B, R) and new h.
 
