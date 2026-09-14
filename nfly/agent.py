@@ -43,20 +43,27 @@ class FlyAgent(nn.Module):
         return agent
 
     @torch.no_grad()
-    def calibrate(self, obs_space: gym.Space, n_probe: int = 64, steps: int = 8, seed: int = 0) -> None:
-        """Set the readout normalisation from the activity reached after `steps` env steps on a
-        probe of `n_probe` random observations (unbounded Box values are clipped to +-3)."""
+    def calibrate(self, obs_space: gym.Space, n_probe: int = 16, steps: int = 64, seed: int = 0) -> None:
+        """Set the readout normalisation from a probe: `n_probe` parallel runs of `steps` env
+        steps, a fresh random observation every step, keeping the readout state of every step.
+        Keeping all steps matters: the network's activity drifts for tens of steps after a reset
+        by far more than any observation changes it, and the scale must cover that drift.
+        Unbounded Box values are clipped to +-3."""
         rng = np.random.default_rng(seed)
         obs_space.seed(int(rng.integers(2**31)))
-        probe = np.stack([obs_space.sample() for _ in range(n_probe)])
-        if isinstance(obs_space, gym.spaces.Box) and not (np.all(np.isfinite(obs_space.low)) and np.all(np.isfinite(obs_space.high))):
-            probe = np.clip(probe, -3, 3)
-        obs = torch.as_tensor(probe, device=self.input_gain.device)
+        unbounded = isinstance(obs_space, gym.spaces.Box) and not (np.all(np.isfinite(obs_space.low)) and np.all(np.isfinite(obs_space.high)))
+
+        def sample():
+            probe = np.stack([obs_space.sample() for _ in range(n_probe)])
+            return torch.as_tensor(np.clip(probe, -3, 3) if unbounded else probe, device=self.input_gain.device)
+
         h = self.initial_state(n_probe)
         weights = self.brain.weights()
+        states = []
         for _ in range(steps):
-            _, h = self.step(obs, h, weights)
-        self.decoder.calibrate(h)
+            _, h = self.step(sample(), h, weights)
+            states.append(h)
+        self.decoder.calibrate(torch.cat(states))
 
     @property
     def n_neurons(self) -> int:

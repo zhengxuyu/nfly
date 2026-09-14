@@ -145,5 +145,7 @@ def test_agent_build_calibrates_readout():
     c = visual_connectome()
     a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
     assert not torch.all(a.decoder.norm.mean == 0)      # calibrated, not the default zeros
-    feats, _ = a.step(torch.rand(6, 84, 84), a.initial_state(6))
-    assert feats.abs().max() <= 10
+    h = a.initial_state(6)
+    for _ in range(40):                                  # features stay in range well after the reset transient
+        feats, h = a.step(torch.rand(6, 84, 84), h)
+    assert feats.abs().max() <= 10 and (feats.abs() >= 10).float().mean() < 0.05
