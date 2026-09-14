@@ -35,7 +35,11 @@ def _finished_returns(info: dict) -> list[float]:
     return []
 
 
-def train_a2c(agent, venv, cfg: A2CConfig, device="cpu", seed: int = 0, log=print) -> list[float]:
+def _log(msg: str) -> None:
+    print(msg, flush=True)   # flush so `tail -f` on a redirected log shows progress immediately
+
+
+def train_a2c(agent, venv, cfg: A2CConfig, device="cpu", seed: int = 0, log=_log) -> list[float]:
     dev = torch.device(device)
     n_envs = venv.num_envs
     opt = torch.optim.Adam([q for q in agent.parameters() if q.requires_grad], lr=cfg.lr)
