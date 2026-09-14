@@ -1,10 +1,10 @@
-![nfly - Fly wiring. Trainable intelligence.](docs/assets/hero.png)
+![nfly - Biological wiring. Mechanical future.](docs/assets/hero-mechanical.png)
 
 # nfly
 
 **A standardised fly-brain neural network built from the Janelia MaleCNS v1.0 connectome, with
-standardised reinforcement-learning infrastructure and a live viewer. It speaks the OpenAI Gym /
-Gymnasium protocol, so it can be pointed at any task and trained in minutes.**
+standardised reinforcement-learning infrastructure and a live viewer.**
+<strong><ins>It speaks the OpenAI Gym / Gymnasium protocol, so it can be pointed at any task and trained in minutes.</ins></strong>
 
 nfly turns the male *Drosophila* central nervous system (166,700 annotated neurons, 10.5M
 synaptic connections) into a sparse, sign-constrained recurrent network you can drop into any
@@ -12,7 +12,7 @@ Gymnasium environment. Observations land on the fly's compound eye, activity flo
 real wiring, and descending / motor neurons are read out as actions.
 
 <p align="center">
-  <a href="docs/assets/fly-3d-preview.png"><img src="docs/assets/fly-3d.gif" alt="A detailed 3D fruit fly rotating through a full turn, with faceted red compound eyes, fine body bristles, six articulated legs and translucent veined wings" width="1000" /></a>
+  <a href="docs/assets/fly-mechanical-blender.png"><img src="docs/assets/fly-mechanical-blender.gif" alt="A Blender-rendered mechanical fruit fly rotating through a full turn, with black titanium armor, amber compound lenses, six piston-driven legs and cyan photonic wings" width="1000" /></a>
   <br />
   <em>A conceptual 3D fly study, not a biological reconstruction or a recording of neural activity.</em>
 </p>
@@ -297,14 +297,14 @@ source), the one-directional layer rule and the uv-only environment rule.
 Code: [MIT](LICENSE). Data: MaleCNS v1.0, CC-BY 4.0 (see [About the data](#about-the-data-janelia-malecns-v10)
 for the citation). Please cite the MaleCNS paper when you publish results built on this model.
 
-README artwork: the [hero](docs/assets/hero.png) and [background](docs/assets/background.png)
-are AI-generated illustrations, not MaleCNS visualisations. The [3D animation](docs/assets/fly-3d.gif)
-is a Blender-rendered illustrative model with compound-eye facets, cuticular bristles,
-segmented legs and translucent veined wings. Its glowing traces are artistic, not neural data.
-View the [full-resolution still](docs/assets/fly-3d-preview.png), or regenerate the animation
-with Blender and FFmpeg installed:
+README artwork: the [hero](docs/assets/hero-mechanical.png) and [neural background](docs/assets/background.png)
+are AI-generated illustrations, not MaleCNS visualisations. The [mechanical fly animation](docs/assets/fly-mechanical-blender.gif)
+is rendered frame by frame in Blender from a 3D model with titanium armor plates, hexagonal optical
+lenses, machined fasteners, piston-driven legs and translucent photonic wings. It is conceptual artwork.
+View the [full-resolution still](docs/assets/fly-mechanical-blender.png), open the
+[editable Blender scene](docs/assets/mechanical-fly.blend), or regenerate with Blender and FFmpeg:
 
 ```bash
-blender --background --python docs/assets/render_fly_blender.py -- --frames 96
-uv run python docs/assets/render_fly.py
+blender --background --python docs/assets/render_mechanical_blender.py -- --frames 96
+uv run python docs/assets/assemble_mechanical.py
 ```
