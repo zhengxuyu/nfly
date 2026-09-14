@@ -241,3 +241,17 @@ def test_ppo_lr_schedule_anneals_and_adapts():
     lrs = [float(l.split("lr")[1].split()[0]) for l in lines]
     assert lrs[0] == 1.0 and lrs[-1] < lrs[0] and all(0.1 <= v <= 1.0 for v in lrs)
     venv.close()
+
+
+def test_calibrate_on_env_uses_real_observations_and_motion():
+    from nfly import load_malecns
+    from nfly.connectome import write_synthetic
+    import tempfile, pathlib
+    c = load_malecns(write_synthetic(pathlib.Path(tempfile.mkdtemp())), cache=False)
+    env = get_suite("atari").make("pong", seed=0)
+    a = FlyAgent.build(c, env.observation_space, env.action_space, readout_dim=8)
+    r2 = a.calibrate_on_env(env, steps=48)
+    assert r2 is not None and a.decoder.n_features == 8 and a.value[0].in_features == 8
+    dist, v, _ = a(torch.rand(2, 84, 84), a.initial_state(2))
+    assert dist.sample().shape == (2,) and v.shape == (2,)
+    env.close()

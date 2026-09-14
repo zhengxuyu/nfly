@@ -25,7 +25,8 @@ def build_config(algo: str = "PPO", suite: str = "atari", game: str = "pong", da
     env = register_nfly_env(suite, game)
     module = RLModuleSpec(module_class=FlyRLModule,
                           model_config={"data_dir": data_dir, "subset": subset, "min_syn": min_syn,
-                                        "rnn_steps": rnn_steps, "max_seq_len": max_seq_len})
+                                        "rnn_steps": rnn_steps, "max_seq_len": max_seq_len,
+                                        "suite": suite, "game": game})
     config = (get_trainable_cls(algo).get_default_config()
               .environment(env)
               .env_runners(num_env_runners=num_env_runners, num_envs_per_env_runner=num_envs_per_env_runner,

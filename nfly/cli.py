@@ -27,6 +27,14 @@ def agent_kwargs(args: argparse.Namespace) -> dict:
     return kw
 
 
+def calibrate_on(agent, env, log=print):
+    """Calibrate the readout on real observations from `env` (a random-policy rollout)."""
+    r2 = agent.calibrate_on_env(env)
+    if r2 is not None:
+        log(f"readout calibrated on {type(env.unwrapped).__name__}: projection R^2 {r2:.3f}, {agent.decoder.n_features} features")
+    return agent
+
+
 def apply_freezes(agent, args: argparse.Namespace):
     """Post-build freezes that go beyond the brain: --heads-only leaves only the heads trainable."""
     if getattr(args, "heads_only", False):

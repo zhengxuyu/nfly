@@ -29,12 +29,17 @@ def value_head(n_features: int, hidden: int = 64) -> nn.Module:
     return nn.Sequential(nn.Linear(n_features, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, 1))
 
 
-def _projection_targets(observed: torch.Tensor, k: int) -> torch.Tensor:
-    """What the readout projection should reconstruct: vector observations as they are, images
-    (or any observation with more than k values) through their top-k principal components."""
+def _projection_targets(observed: torch.Tensor, k: int, previous: torch.Tensor | None = None) -> torch.Tensor:
+    """What the readout projection should reconstruct: vector observations as they are; images
+    (or any observation with more than k values) through the top-k principal components of
+    [frame, frame - previous frame], so that the readout has to carry motion as well as layout.
+    A single-frame target would calibrate the readout to a still picture, and a linear policy
+    on a still picture cannot see where the ball is going."""
     flat = observed.reshape(observed.shape[0], -1)
     if flat.shape[1] <= k:
         return flat
+    if previous is not None:
+        flat = torch.cat([flat, flat - previous.reshape(previous.shape[0], -1)], 1)
     centred = flat - flat.mean(0)
     _, _, v = torch.pca_lowrank(centred, q=k, center=False)
     return centred @ v
@@ -107,6 +112,31 @@ class FlyAgent(nn.Module):
             observed.append(obs)
         states, observed = torch.cat(states), torch.cat(observed)
         r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features))
+        self.value = value_head(self.decoder.n_features).to(dev)
+        return r2
+
+    @torch.no_grad()
+    def calibrate_on_env(self, env: gym.Env, steps: int = 512, seed: int = 0) -> float | None:
+        """Calibrate the readout on real observations: a random-policy rollout of `steps` env
+        steps (episodes reset as they end), instead of the synthetic probe of `calibrate`.
+        Needed for images, where random samples of the observation space are noise and say
+        nothing about what frames look like. Uses the resting state set by `calibrate`."""
+        dev = self.input_gain.device
+        weights = self.brain.weights()
+        obs, _ = env.reset(seed=seed)
+        h = self.initial_state(1)
+        states, observed, previous = [], [], []
+        prev = torch.as_tensor(np.asarray(obs), device=dev).float()
+        for _ in range(steps):
+            x = torch.as_tensor(np.asarray(obs), device=dev).float()
+            _, h = self.step(x.unsqueeze(0), h, weights)
+            states.append(h); observed.append(x); previous.append(prev)
+            prev = x
+            obs, _, term, trunc, _ = env.step(env.action_space.sample())
+            if term or trunc:
+                obs, _ = env.reset(); h = self.initial_state(1); prev = torch.as_tensor(np.asarray(obs), device=dev).float()
+        states, observed, previous = torch.cat(states), torch.stack(observed), torch.stack(previous)
+        r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features, previous))
         self.value = value_head(self.decoder.n_features).to(dev)
         return r2
 
