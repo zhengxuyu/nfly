@@ -11,4 +11,7 @@ rllib = ["ray[rllib]>=2.40"]
 dev = ["pytest", "gymnasium>=1.0", "ale-py>=0.10", "opencv-python-headless>=4.8", "ray[rllib]>=2.40"]
 
 [tool.setuptools]
-packages = ["nfly", "nfly.connectome", "nfly.brain", "nfly.interface", "nfly.suite", "nfly.rl", "nfly.rl.simple", "nfly.rl.rllib"]
+packages = ["nfly", "nfly.connectome", "nfly.brain", "nfly.interface", "nfly.suite", "nfly.rl", "nfly.rl.simple", "nfly.rl.rllib", "nfly.viz"]
+
+[tool.setuptools.package-data]
+nfly = ["viz/static/*.html"]
