@@ -30,6 +30,7 @@ def main() -> None:
     p.add_argument("--minibatch", type=int, default=256)
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--lr", type=float, default=2.5e-4)
+    p.add_argument("--entropy-coeff", type=float, default=0.01)
     p.add_argument("--iters", type=int, default=100)
     p.add_argument("--checkpoint-every", type=int, default=10)
     p.add_argument("--out", default="runs/rllib")
@@ -40,7 +41,7 @@ def main() -> None:
                           min_syn=args.min_syn, rnn_steps=args.rnn_steps, max_seq_len=args.max_seq_len,
                           num_env_runners=args.env_runners, num_envs_per_env_runner=args.envs_per_runner,
                           num_gpus=args.gpus, train_batch_size=args.train_batch, minibatch_size=args.minibatch,
-                          num_epochs=args.epochs, lr=args.lr)
+                          num_epochs=args.epochs, lr=args.lr, entropy_coeff=args.entropy_coeff)
     algo = config.build_algo()
     for i in range(1, args.iters + 1):
         r = algo.train()
