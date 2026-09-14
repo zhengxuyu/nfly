@@ -22,8 +22,15 @@ from .interface.encoders import ObservationEncoder
 
 
 class FlyAgent(nn.Module):
+    """Defaults (rnn_steps 4, alpha 0.7, input_gain 5) come from a probe on CartPole: with one
+    network step per env step and alpha 0.3, the 3-4 synaptic hops from sensory to descending
+    neurons act as a low-pass filter that erases fast observation components (angular velocity
+    was not linearly decodable at the readout, imitation of a competent policy was at chance);
+    with four steps per env step and alpha 0.7 every observation dimension is decodable
+    (R^2 0.8-0.93) and a linear probe imitates the policy at 88%."""
+
     def __init__(self, brain: ConnectomeRNN, encoder: ObservationEncoder, decoder: ActionDecoder,
-                 rnn_steps: int = 2, input_gain: float = 1.0):
+                 rnn_steps: int = 4, input_gain: float = 5.0):
         super().__init__()
         self.brain, self.encoder, self.decoder = brain, encoder, decoder
         self.rnn_steps = rnn_steps
@@ -31,8 +38,8 @@ class FlyAgent(nn.Module):
         self.value = nn.Linear(decoder.n_readout, 1)
 
     @classmethod
-    def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 2,
-              input_gain: float = 1.0, alpha_init: float = 0.3, global_scale: float = 1.0, bias_init: float = 0.1,
+    def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
+              input_gain: float = 5.0, alpha_init: float = 0.7, global_scale: float = 1.0, bias_init: float = 0.1,
               encoder: ObservationEncoder | None = None, decoder: ActionDecoder | None = None,
               readout_idx: torch.Tensor | None = None, encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
@@ -71,6 +78,10 @@ class FlyAgent(nn.Module):
 
     def initial_state(self, batch: int) -> torch.Tensor:
         return torch.zeros(batch, self.brain.n, device=self.input_gain.device)
+
+    def weights(self) -> Weights:
+        """Derived parameters for an unroll; trainers compute this once per replayed segment."""
+        return self.brain.weights()
 
     def step(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """One env step: obs (B, ...) and state h (B, N) -> readout features (B, R) and new h.

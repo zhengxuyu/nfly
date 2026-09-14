@@ -37,7 +37,7 @@ class FlyRLModule(TorchRLModule, ValueFunctionAPI, TargetNetworkAPI):
         conn = select_subset(load_malecns(cfg.get("data_dir", "data"), min_syn=cfg.get("min_syn", 3)),
                              cfg.get("subset", "visual"))
         self.agent = FlyAgent.build(conn, self.observation_space, self.action_space,
-                                    rnn_steps=cfg.get("rnn_steps", 2))
+                                    rnn_steps=cfg.get("rnn_steps", 4))
 
     def get_initial_state(self) -> dict[str, np.ndarray]:
         return {STATE_KEY: np.zeros(self.agent.n_neurons, dtype=np.float32)}

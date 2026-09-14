@@ -20,6 +20,6 @@ def connectome_from_args(args: argparse.Namespace) -> Connectome:
 
 
 def add_agent_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--rnn-steps", type=int, default=2, help="network steps per env step")
+    p.add_argument("--rnn-steps", type=int, default=4, help="network steps per env step")
     p.add_argument("--device", default="cpu")
     p.add_argument("--seed", type=int, default=0)

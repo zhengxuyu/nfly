@@ -27,7 +27,7 @@ def main() -> None:
     p.add_argument("--data", default="data")
     p.add_argument("--subset", default="visual")
     p.add_argument("--min-syn", type=int, default=3)
-    p.add_argument("--rnn-steps", type=int, default=2)
+    p.add_argument("--rnn-steps", type=int, default=4)
     p.add_argument("--max-seq-len", type=int, default=32)
     p.add_argument("--env-runners", type=int, default=4)
     p.add_argument("--envs-per-runner", type=int, default=2)

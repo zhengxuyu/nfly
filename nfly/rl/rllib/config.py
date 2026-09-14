@@ -17,7 +17,7 @@ from .module import FlyRLModule
 
 
 def build_config(algo: str = "PPO", suite: str = "atari", game: str = "pong", data_dir: str = "data",
-                 subset: str = "visual", min_syn: int = 3, rnn_steps: int = 2, max_seq_len: int = 32,
+                 subset: str = "visual", min_syn: int = 3, rnn_steps: int = 4, max_seq_len: int = 32,
                  num_env_runners: int = 4, num_envs_per_env_runner: int = 2, num_gpus: float = 0,
                  train_batch_size: int = 2048, minibatch_size: int = 256, num_epochs: int = 3,
                  lr: float = 2.5e-4, **training_kw) -> AlgorithmConfig:
