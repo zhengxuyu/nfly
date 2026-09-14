@@ -192,7 +192,7 @@ def test_readout_bottleneck_shapes():
     c = visual_connectome()
     a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
     feats, _ = a.step(torch.rand(3, 84, 84), a.initial_state(3))
-    assert feats.shape == (3, 8) and a.decoder.n_features == 8 and a.value.in_features == 8
+    assert feats.shape == (3, 8) and a.decoder.n_features == 8 and a.value[0].in_features == 8
     full = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=None)
     assert full.decoder.n_features == full.decoder.n_readout
     # head lr is unscaled with the bottleneck, scaled without it
@@ -217,7 +217,7 @@ def test_calibrated_projection_reconstructs_vector_observations():
     c = load_malecns(write_synthetic(pathlib.Path(tempfile.mkdtemp())), cache=False)
     space = gym.spaces.Box(-1, 1, (4,), np.float32)
     a = FlyAgent.build(c, space, gym.spaces.Discrete(2))
-    assert a.decoder.n_features == 4 and a.value.in_features == 4       # k shrinks to the observation width
+    assert a.decoder.n_features == 4 and a.value[0].in_features == 4    # k shrinks to the observation width
     r2 = a.calibrate(space)
     assert r2 is not None and r2 > 0.5
     # heads still produce the right shapes after the rebuild

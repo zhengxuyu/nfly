@@ -21,6 +21,14 @@ from .interface.decoders import ActionDecoder
 from .interface.encoders import ObservationEncoder
 
 
+def value_head(n_features: int, hidden: int = 64) -> nn.Module:
+    """A small tanh MLP critic. The policy stays linear on the readout, so this changes nothing
+    about how the fly acts; it only gives training a value function that can fit the task
+    (a linear critic could not, and a linear policy with a linear critic collapsed on CartPole
+    while the same policy with this critic learned as fast as an MLP policy)."""
+    return nn.Sequential(nn.Linear(n_features, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, 1))
+
+
 def _projection_targets(observed: torch.Tensor, k: int) -> torch.Tensor:
     """What the readout projection should reconstruct: vector observations as they are, images
     (or any observation with more than k values) through their top-k principal components."""
@@ -46,7 +54,7 @@ class FlyAgent(nn.Module):
         self.brain, self.encoder, self.decoder = brain, encoder, decoder
         self.rnn_steps = rnn_steps
         self.input_gain = nn.Parameter(torch.tensor(float(input_gain)))
-        self.value = nn.Linear(decoder.n_features, 1)
+        self.value = value_head(decoder.n_features)
         self.register_buffer("h_rest", torch.zeros(brain.n))    # resting state; episodes start here
 
     @classmethod
@@ -99,7 +107,7 @@ class FlyAgent(nn.Module):
             observed.append(obs)
         states, observed = torch.cat(states), torch.cat(observed)
         r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features))
-        self.value = nn.Linear(self.decoder.n_features, 1).to(dev)
+        self.value = value_head(self.decoder.n_features).to(dev)
         return r2
 
     @property
