@@ -1,10 +1,10 @@
-![nfly - Fly wiring. Trainable intelligence.](docs/assets/hero.png)
+![nfly - Biological wiring. Mechanical future.](docs/assets/hero-mechanical.png)
 
 # nfly
 
 **A standardised fly-brain neural network built from the Janelia MaleCNS v1.0 connectome, with
-standardised reinforcement-learning infrastructure and a live viewer. It speaks the OpenAI Gym /
-Gymnasium protocol, so it can be pointed at any task and trained in minutes.**
+standardised reinforcement-learning infrastructure and a live viewer.**
+<strong><ins>It speaks the OpenAI Gym / Gymnasium protocol, so it can be pointed at any task and trained in minutes.</ins></strong>
 
 nfly turns the male *Drosophila* central nervous system (166,700 annotated neurons, 10.5M
 synaptic connections) into a sparse, sign-constrained recurrent network you can drop into any
@@ -12,10 +12,12 @@ Gymnasium environment. Observations land on the fly's compound eye, activity flo
 real wiring, and descending / motor neurons are read out as actions.
 
 <p align="center">
-  <a href="docs/assets/fly-3d-preview.png"><img src="docs/assets/fly-3d.gif" alt="A detailed 3D fruit fly rotating through a full turn, with faceted red compound eyes, fine body bristles, six articulated legs and translucent veined wings" width="1000" /></a>
+  <a href="docs/assets/fly-anatomy.gif?raw=true"><img src="docs/assets/fly-anatomy.gif" alt="Annotated rotating mechanical fly: eyes encode images through hexagonal retina sampling, the body represents a sparse ConnectomeRNN, and feet represent Gymnasium action outputs" width="1120" /></a>
   <br />
-  <em>A conceptual 3D fly study, not a biological reconstruction or a recording of neural activity.</em>
+  <em>Eyes: visual input. Body: connectome-constrained recurrent network. Feet: Gym action output.</em>
 </p>
+
+[Open the GIF](docs/assets/fly-anatomy.gif?raw=true) | [Full-size diagram](docs/assets/fly-anatomy.png) | [Editable Blender scene](docs/assets/mechanical-fly-annotated.blend)
 
 ```text
 observation        (gym observation_space: frames, vectors, ...)
@@ -267,23 +269,47 @@ step of every episode, so keep `--max-seq-len` moderate.
 
 ## Benchmarks
 
-Scores obtained so far, recorded as they are. All runs use the MaleCNS `visual` sub-network
-(138,743 neurons, 8.4M edges) on one shared RTX 5090; "return" is the mean episode return of the
-last 20 episodes at the end of the run. Pong reference points: random policy about -20.7,
-human about 14.6 (Mnih et al. 2015).
+Scores obtained so far, recorded as they are, including negative results. "Return" is the mean
+episode return of the last 20 episodes; "MLP" is `nfly.rl.simple.reference.MLPReference`, an
+ordinary 4.7k-parameter network run through the same trainer and config, so the fly can be
+compared against a conventional policy under identical conditions.
 
-| Game | Trainer | Config | Env steps | Return | Entropy at end | Notes |
+### CartPole-v1 (max 500, random about 22)
+
+Simple PPO, 16 envs, rollout 32. Fly runs use the `visual_small` sub-network (106,579
+neurons, 5.2M edges) on one shared RTX 5090; the MLP runs on a laptop CPU.
+
+| Model | Trainer config | Env steps | Return | Notes |
+| --- | --- | --- | --- | --- |
+| MLP | old defaults (lr 2.5e-4, 3 epochs, minibatch 4 envs, gamma 0.99, lambda 0.95, entropy 0.01) | 100k | 80 | loop works, but conservative settings learn slowly |
+| MLP | CleanRL-style (rollout 128, 4 epochs) | 100k | 42 | |
+| MLP | SB3 rl-zoo settings (lr 1e-3, 10 epochs, minibatch 8 envs, gamma 0.98, lambda 0.8, no entropy) | 100k | 223 | |
+| MLP | **current defaults** (zoo settings + target_kl 0.02) | 100k | 174 | |
+| Fly v1 | old defaults; rnn_steps 1, alpha 0.3, LayerNorm readout | 51k | 23 | never above random: observation signal lost at the readout |
+| Fly v2 | old defaults; rnn_steps 4, alpha 0.7, calibrated readout, obs normalisation | 102k | 9 (peak 48) | first run above random, then KL spike (0.16) and collapse under uniform lr 2.5e-4 |
+| Fly v3 | current defaults (brain lr x0.1, target_kl) | running | | |
+
+### Pong (ALE, max +21, random about -20.7, human about 14.6)
+
+All fly runs use the `visual` sub-network (138,743 neurons, 8.4M edges) on the shared RTX 5090
+and the pre-fix model (rnn_steps 2 or 1, LayerNorm readout); they are kept for the record and
+will be rerun with the fixed model.
+
+| Model | Trainer | Config | Env steps | Return | Entropy at end | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Pong | simple A2C | rnn_steps 2, 8 envs, rollout 16, lr 3e-4, entropy 0.01 | 321k | -20.5 | 0.64 | policy collapsed to two actions within 100k steps, partial recovery |
-| Pong | simple PPO | rnn_steps 2, 8 envs, rollout 32, 3 epochs, clip 0.2, entropy 0.01 | 289k | -19.8 | 0.55 | slower collapse than A2C, no score gain |
-| Pong | RLlib PPO | rnn_steps 2, 8 runners x 2 envs, batch 4096, minibatch 256 | 41k | -20.6 | 1.66 | stopped by a checkpoint-path bug (fixed) |
-| Pong | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 120k (running) | -20.5 | 1.68 | entropy stable so far; 160 env steps / s |
+| Fly | simple A2C | rnn_steps 2, 8 envs, rollout 16, lr 3e-4, entropy 0.01 | 321k | -20.5 | 0.64 | policy collapsed to two actions within 100k steps |
+| Fly | simple PPO | rnn_steps 2, 8 envs, rollout 32, 3 epochs, entropy 0.01 | 289k | -19.8 | 0.55 | slower collapse, no score gain |
+| Fly | RLlib PPO | rnn_steps 2, 8 runners x 2 envs, batch 4096, minibatch 256 | 41k | -20.6 | 1.66 | stopped by a checkpoint-path bug (fixed) |
+| Fly | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 755k | -20.3 | 1.71 | entropy and return flat throughout; 160 env steps / s |
 
-None of these runs has learned Pong yet: they are all inside the first few hundred thousand
-steps, where a standard CNN policy also still scores about -21. The table is here to be
-updated, including negative results. To add a row, run one of the training commands above,
-read the last log line (simple trainers) or the last `{"iter": ...}` line (RLlib), and record
-the config, env steps, return and entropy.
+What the CartPole rows established: the training loop is sound (MLP learns), and the fly's
+failure was in the model. Two defects were found with linear probes on the frozen network and
+fixed: the descending-neuron readout was dominated by a fixed resting pattern (now removed by a
+calibrated per-neuron normalisation), and one network step per env step low-pass filtered fast
+observation components away (now four steps per env step with a faster leak).
+
+To add a row, run one of the training commands above, read the last log line (simple trainers)
+or the last `{"iter": ...}` line (RLlib), and record the config, env steps, return and entropy.
 
 ## Code principles
 
@@ -297,14 +323,18 @@ source), the one-directional layer rule and the uv-only environment rule.
 Code: [MIT](LICENSE). Data: MaleCNS v1.0, CC-BY 4.0 (see [About the data](#about-the-data-janelia-malecns-v10)
 for the citation). Please cite the MaleCNS paper when you publish results built on this model.
 
-README artwork: the [hero](docs/assets/hero.png) and [background](docs/assets/background.png)
-are AI-generated illustrations, not MaleCNS visualisations. The [3D animation](docs/assets/fly-3d.gif)
-is a Blender-rendered illustrative model with compound-eye facets, cuticular bristles,
-segmented legs and translucent veined wings. Its glowing traces are artistic, not neural data.
-View the [full-resolution still](docs/assets/fly-3d-preview.png), or regenerate the animation
-with Blender and FFmpeg installed:
+README artwork: the [hero](docs/assets/hero-mechanical.png) and [neural background](docs/assets/background.png)
+are AI-generated illustrations, not MaleCNS visualisations. The [mechanical fly animation](docs/assets/fly-anatomy.gif)
+is rendered frame by frame in Blender from a 3D model with titanium armor plates, hexagonal optical
+lenses, machined fasteners, piston-driven legs and translucent photonic wings. It is conceptual artwork.
+Its camera-facing labels map the eyes to `RetinaEncoder`, the body to the sparse rate-based
+`ConnectomeRNN`, and the feet to `ActionDecoder`. The six feet illustrate output collectively;
+they do not imply six fixed actions. The frame-to-hex diagram is illustrative, not a recorded rollout.
+View the [full-resolution diagram](docs/assets/fly-anatomy.png), open the
+[annotated Blender scene](docs/assets/mechanical-fly-annotated.blend), or regenerate with Blender and FFmpeg:
 
 ```bash
-blender --background --python docs/assets/render_fly_blender.py -- --frames 96
-uv run python docs/assets/render_fly.py
+blender --background docs/assets/mechanical-fly.blend \
+  --python docs/assets/annotate_mechanical_blender.py -- --frames 72
+uv run python docs/assets/assemble_anatomy.py
 ```
