@@ -287,7 +287,13 @@ neurons, 5.2M edges) on one shared RTX 5090; the MLP runs on a laptop CPU.
 | MLP | **current defaults** (zoo settings + target_kl 0.02) | 100k | 174 | |
 | Fly v1 | old defaults; rnn_steps 1, alpha 0.3, LayerNorm readout | 51k | 23 | never above random: observation signal lost at the readout |
 | Fly v2 | old defaults; rnn_steps 4, alpha 0.7, calibrated readout, obs normalisation | 102k | 9 (peak 48) | first run above random, then KL spike (0.16) and collapse under uniform lr 2.5e-4 |
-| Fly v3 | current defaults (brain lr x0.1, target_kl) | running | | |
+| Fly v3 | zoo defaults, uniform lr 1e-3 | 5k | 11 | 1,314-input linear head saturated within 10 updates |
+| Fly v4 | zoo defaults, head lr 5e-5 | 56k | 63 | stable, slow rise |
+| Fly v5 | + resting-state start, readout regressed onto observations (4-d), linear critic | 102k | 21 | random level; a linear policy with a linear critic fails on the raw observation too (72 then 19) |
+| **Fly v6** | **v5 + small MLP critic (policy still linear on the readout)** | **102k** | **36 (peak 228 at 97k)** | learns to MLP level and beyond but oscillates: 131, 151, 180, 223, 168, 147, 228, 36 over updates 70-200 |
+| Fly v6, brain frozen | as v6, connectome parameters fixed | 102k | 101 (peak 133) | learns, oscillates more (drops to 21 twice) |
+
+The full investigation, experiment by experiment, is in [docs/ablation-cartpole.md](docs/ablation-cartpole.md).
 
 ### Pong (ALE, max +21, random about -20.7, human about 14.6)
 
@@ -302,11 +308,14 @@ will be rerun with the fixed model.
 | Fly | RLlib PPO | rnn_steps 2, 8 runners x 2 envs, batch 4096, minibatch 256 | 41k | -20.6 | 1.66 | stopped by a checkpoint-path bug (fixed) |
 | Fly | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 755k | -20.3 | 1.71 | entropy and return flat throughout; 160 env steps / s |
 
-What the CartPole rows established: the training loop is sound (MLP learns), and the fly's
-failure was in the model. Two defects were found with linear probes on the frozen network and
-fixed: the descending-neuron readout was dominated by a fixed resting pattern (now removed by a
-calibrated per-neuron normalisation), and one network step per env step low-pass filtered fast
-observation components away (now four steps per env step with a faster leak).
+What the CartPole rows established: the training loop is sound (MLP learns); the connectome
+transmits the full state to the descending neurons (a behaviour-cloned linear head on the
+frozen, untrained network scores 500/500); and five interface and training defects, found with
+linear probes on the frozen network, stood between that and reinforcement learning: a readout
+dominated by the resting pattern, fast observation components filtered by one step per frame,
+a 10x transient at every reset, a random readout projection half made of drift, and a linear
+critic. With those fixed the fly learns CartPole to the MLP's level and beyond, though not yet
+stably; that stability, and Pong, are the open items.
 
 To add a row, run one of the training commands above, read the last log line (simple trainers)
 or the last `{"iter": ...}` line (RLlib), and record the config, env steps, return and entropy.

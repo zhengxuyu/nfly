@@ -174,7 +174,19 @@ weakness of a linear policy under this trainer. The culprit is the linear value 
 fly computes when acting, so it is admissible. **Change:** the value head is a small tanh MLP
 on the readout features; the policy stays linear.
 
-**Run v6** (regression readout + MLP critic; full model and frozen brain): in progress.
+**Run v6** (regression readout + MLP critic), 200 updates, 102k steps:
+
+| Update | 70 | 90 | 110 | 130 | 150 | 170 | 190 | 200 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| full model | 131 | 151 | 180 | 223 | 168 | 147 | 228 | 36 |
+| brain frozen | 55 | 98 | 133 | 24 | 109 | 121 | 21 | 101 |
+| MLP (same trainer) | 99 | ~130 | 168 | ~175 | 179 | ~175 | 174 | |
+
+**Conclusion.** The fly learns CartPole, reaching and exceeding the MLP's level with the brain
+trainable, and learns more slowly and less steadily with the brain frozen. Both oscillate:
+updates with KL 0.02-0.03 cut the epochs to 1-2 by target_kl and still move the policy far
+enough to lose 100-200 points in ten updates. Stabilising that (smaller head steps once the
+policy is good, or lr annealing) is the next item.
 
 ## What is settled and what is open
 
@@ -186,10 +198,12 @@ Settled:
   fast components filtered by one step per frame, a 10x transient at every reset.
 - Collapse comes from high-dimensional or high-rate heads, not from the brain parameters.
 
+Settled by v6:
+- With the MLP critic, RL finds the head: 228 at update 190 versus the MLP's 174.
+- Training the brain parameters helps: the frozen-brain run peaks lower (133) and collapses
+  to random twice; the trainable run is steadier and higher.
+
 Open:
-- Whether the MLP critic lets RL find the head that behaviour cloning finds on the fly's
-  features as it does on the plain observation (run v6).
-- Whether training the brain parameters helps or hurts once the interface is right (v5 full vs
-  frozen were indistinguishable).
+- Stability: both runs oscillate by 100-200 points between updates late in training.
 - Everything above is CartPole; Pong will re-open the question of what the optic lobe
   contributes beyond transmission.
