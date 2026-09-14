@@ -12,10 +12,12 @@ Gymnasium environment. Observations land on the fly's compound eye, activity flo
 real wiring, and descending / motor neurons are read out as actions.
 
 <p align="center">
-  <a href="docs/assets/fly-mechanical-blender.png"><img src="docs/assets/fly-mechanical-blender.gif" alt="A Blender-rendered mechanical fruit fly rotating through a full turn, with black titanium armor, amber compound lenses, six piston-driven legs and cyan photonic wings" width="1000" /></a>
+  <a href="docs/assets/fly-anatomy.gif?raw=true"><img src="docs/assets/fly-anatomy.gif" alt="Annotated rotating mechanical fly: eyes encode images through hexagonal retina sampling, the body represents a sparse ConnectomeRNN, and feet represent Gymnasium action outputs" width="1120" /></a>
   <br />
-  <em>A conceptual 3D fly study, not a biological reconstruction or a recording of neural activity.</em>
+  <em>Eyes: visual input. Body: connectome-constrained recurrent network. Feet: Gym action output.</em>
 </p>
+
+[Open the GIF](docs/assets/fly-anatomy.gif?raw=true) | [Full-size diagram](docs/assets/fly-anatomy.png) | [Editable Blender scene](docs/assets/mechanical-fly-annotated.blend)
 
 ```text
 observation        (gym observation_space: frames, vectors, ...)
@@ -298,13 +300,17 @@ Code: [MIT](LICENSE). Data: MaleCNS v1.0, CC-BY 4.0 (see [About the data](#about
 for the citation). Please cite the MaleCNS paper when you publish results built on this model.
 
 README artwork: the [hero](docs/assets/hero-mechanical.png) and [neural background](docs/assets/background.png)
-are AI-generated illustrations, not MaleCNS visualisations. The [mechanical fly animation](docs/assets/fly-mechanical-blender.gif)
+are AI-generated illustrations, not MaleCNS visualisations. The [mechanical fly animation](docs/assets/fly-anatomy.gif)
 is rendered frame by frame in Blender from a 3D model with titanium armor plates, hexagonal optical
 lenses, machined fasteners, piston-driven legs and translucent photonic wings. It is conceptual artwork.
-View the [full-resolution still](docs/assets/fly-mechanical-blender.png), open the
-[editable Blender scene](docs/assets/mechanical-fly.blend), or regenerate with Blender and FFmpeg:
+Its camera-facing labels map the eyes to `RetinaEncoder`, the body to the sparse rate-based
+`ConnectomeRNN`, and the feet to `ActionDecoder`. The six feet illustrate output collectively;
+they do not imply six fixed actions. The frame-to-hex diagram is illustrative, not a recorded rollout.
+View the [full-resolution diagram](docs/assets/fly-anatomy.png), open the
+[annotated Blender scene](docs/assets/mechanical-fly-annotated.blend), or regenerate with Blender and FFmpeg:
 
 ```bash
-blender --background --python docs/assets/render_mechanical_blender.py -- --frames 96
-uv run python docs/assets/assemble_mechanical.py
+blender --background docs/assets/mechanical-fly.blend \
+  --python docs/assets/annotate_mechanical_blender.py -- --frames 72
+uv run python docs/assets/assemble_anatomy.py
 ```
