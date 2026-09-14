@@ -14,7 +14,7 @@ import gymnasium as gym
 import torch
 from torch import nn
 
-from .brain.rnn import ConnectomeRNN
+from .brain.rnn import ConnectomeRNN, Weights
 from .connectome.base import Connectome
 from .interface.decoders import ActionDecoder
 from .interface.encoders import ObservationEncoder
@@ -46,18 +46,21 @@ class FlyAgent(nn.Module):
     def initial_state(self, batch: int) -> torch.Tensor:
         return torch.zeros(batch, self.brain.n, device=self.input_gain.device)
 
-    def step(self, obs: torch.Tensor, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """One env step: obs (B, ...) and state h (B, N) -> readout features (B, R) and new h."""
+    def step(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """One env step: obs (B, ...) and state h (B, N) -> readout features (B, R) and new h.
+
+        Callers that unroll several steps with gradients should pass `weights=self.brain.weights()`
+        computed once, so autograd does not keep E-sized intermediates per step."""
+        weights = weights or self.brain.weights()
         drive = self.encoder.encode(obs) * self.input_gain
         u = torch.zeros_like(h).index_copy(1, self.encoder.idx, drive)
-        w, alpha = self.brain.edge_weights(), self.brain.alpha()
         for _ in range(self.rnn_steps):
-            h = self.brain.step(h, u, w, alpha)
+            h = self.brain.step(h, u, weights)
         return self.decoder.features(h), h
 
-    def forward(self, obs: torch.Tensor, h: torch.Tensor):
+    def forward(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None):
         """Returns (action distribution, value (B,), new h)."""
-        feats, h = self.step(obs, h)
+        feats, h = self.step(obs, h, weights)
         return self.decoder.distribution(feats), self.value(feats).squeeze(-1), h
 
     def act(self, obs, h, greedy: bool = False):

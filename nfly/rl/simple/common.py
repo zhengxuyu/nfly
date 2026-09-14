@@ -79,9 +79,10 @@ def replay(agent, ro: Rollout, env_idx: torch.Tensor, device):
 
     Returns log-probs (T, b), entropies (T, b), values (T, b)."""
     h = ro.h0[env_idx]
+    weights = agent.brain.weights()
     logps, ents, values = [], [], []
     for t in range(len(ro.obs)):
-        dist, value, h = agent(torch.as_tensor(ro.obs[t][env_idx.cpu().numpy()], device=device), h)
+        dist, value, h = agent(torch.as_tensor(ro.obs[t][env_idx.cpu().numpy()], device=device), h, weights)
         logps.append(dist.log_prob(ro.actions[t][env_idx])); ents.append(dist.entropy()); values.append(value)
         h = h * (1 - ro.dones[t][env_idx]).unsqueeze(1)
     return torch.stack(logps), torch.stack(ents), torch.stack(values)

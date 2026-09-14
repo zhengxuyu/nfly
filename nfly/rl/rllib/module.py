@@ -52,9 +52,10 @@ class FlyRLModule(TorchRLModule, ValueFunctionAPI):
         """(B, T, obs...) + state_in -> readout features (B, T, R) and state_out."""
         obs = batch[Columns.OBS]
         h = batch[Columns.STATE_IN][STATE_KEY]
+        weights = self.agent.brain.weights()
         feats = []
         for t in range(obs.shape[1]):
-            f, h = self.agent.step(obs[:, t], h)
+            f, h = self.agent.step(obs[:, t], h, weights)
             feats.append(f)
         return torch.stack(feats, dim=1), {STATE_KEY: h}
 

@@ -10,6 +10,7 @@ leak, i.e. 1/time-constant) and b (bias / negative threshold) are also per-neuro
 from __future__ import annotations
 
 import dataclasses
+from typing import NamedTuple
 
 import torch
 from torch import nn
@@ -40,6 +41,15 @@ class InputDrive:
         a, b = on if on else (0, steps)
         d[:, a:b, :] = amplitude
         return InputDrive(torch.as_tensor(idx, dtype=torch.long), d)
+
+
+class Weights(NamedTuple):
+    """Per-forward derived parameters: effective edge weights (E,) and per-neuron leak (N,).
+    Compute once per unroll (`ConnectomeRNN.weights()`), not once per step: the E-sized
+    intermediates would otherwise be kept by autograd for every step."""
+
+    w: torch.Tensor
+    alpha: torch.Tensor
 
 
 EDGE_CHUNK = 2_000_000   # edges processed per chunk; transient memory is batch x chunk floats
@@ -102,6 +112,7 @@ class ConnectomeRNN(nn.Module):
         self.bias = nn.Parameter(torch.full((n,), float(bias_init)), requires_grad=learn_bias)
         self.h_max = h_max
         self.edge_chunk = edge_chunk
+        self._cached: tuple[int, Weights] | None = None
         a = torch.full((n,), float(alpha_init))
         self.alpha_logit = nn.Parameter(torch.log(a / (1 - a)), requires_grad=learn_alpha)
         self.act = {"relu": torch.relu, "tanh": torch.tanh, "softplus": nn.functional.softplus}[activation]
@@ -114,6 +125,17 @@ class ConnectomeRNN(nn.Module):
     def alpha(self) -> torch.Tensor:
         return torch.sigmoid(self.alpha_logit)
 
+    def weights(self) -> Weights:
+        """Derived parameters for one unroll.  Under no_grad (inference) the result is cached
+        and only recomputed after the parameters were modified in place (optimizer step,
+        load_state_dict), which is what `_version` tracks."""
+        if torch.is_grad_enabled():
+            return Weights(self.edge_weights(), self.alpha())
+        version = self.log_gain._version + self.alpha_logit._version
+        if self._cached is None or self._cached[0] != version:
+            self._cached = (version, Weights(self.edge_weights(), self.alpha()))
+        return self._cached[1]
+
     def recurrent_input(self, h: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         """(W h) for a batch h of shape (B, N) using gather + index_add (works on CPU/CUDA/MPS).
 
@@ -122,14 +144,14 @@ class ConnectomeRNN(nn.Module):
         return _SparseRecurrent.apply(h, w, self.pre, self.post, self.edge_chunk)
 
     # ---- dynamics --------------------------------------------------------------
-    def step(self, h: torch.Tensor, u: torch.Tensor | None, w: torch.Tensor, alpha: torch.Tensor) -> torch.Tensor:
-        x = self.recurrent_input(h, w) + self.bias
+    def step(self, h: torch.Tensor, u: torch.Tensor | None, weights: Weights) -> torch.Tensor:
+        x = self.recurrent_input(h, weights.w) + self.bias
         if u is not None:
             x = x + u
         x = self.act(x)
         if self.h_max is not None:
             x = x.clamp(max=self.h_max)
-        return (1 - alpha) * h + alpha * x
+        return (1 - weights.alpha) * h + weights.alpha * x
 
     def forward(self, drive: InputDrive | None = None, steps: int | None = None, batch: int = 1,
                 h0: torch.Tensor | None = None, record: torch.Tensor | None = None) -> torch.Tensor:
@@ -144,14 +166,14 @@ class ConnectomeRNN(nn.Module):
         assert steps is not None, "give either `drive` or `steps`"
         dev = self.w0.device
         h = torch.zeros(batch, self.n, device=dev) if h0 is None else h0.to(dev)
-        w, alpha = self.edge_weights(), self.alpha()
+        weights = self.weights()
         hist = [h if record is None else h[:, record]]
         for t in range(steps):
             u = None
             if drive is not None:
                 u = torch.zeros(batch, self.n, device=dev)
                 u[:, drive.idx.to(dev)] = drive.drive[:, t].to(dev)
-            h = self.step(h, u, w, alpha)
+            h = self.step(h, u, weights)
             hist.append(h if record is None else h[:, record])
         return torch.stack(hist, dim=1)
 

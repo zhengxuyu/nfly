@@ -76,3 +76,16 @@ def test_stimulate_runs(tmp_path):
     res = stimulate(c, ConnectomeRNN(c, global_scale=5.0), c.input_nodes()[:5], steps=8, top=5)
     assert len(res.active_per_step) == 9 and not res.top_neurons["stimulated"].any()
     assert "top downstream" in res.report()
+
+
+def test_weights_cache_invalidates_after_parameter_update(tmp_path):
+    c = make(tmp_path, n_columns=5, n_central=40, edges=300)
+    m = ConnectomeRNN(c)
+    with torch.no_grad():
+        w1 = m.weights()
+        assert m.weights() is w1                         # cached while parameters are unchanged
+        m.log_gain.add_(1.0)                             # in-place update, as an optimizer does
+        w2 = m.weights()
+    assert w2 is not w1 and torch.allclose(w2.w, w1.w * torch.e)
+    with torch.enable_grad():
+        assert m.weights().w.requires_grad               # training path never uses the cache
