@@ -73,11 +73,19 @@ Check every change against this list before committing; fix the smell rather tha
 - Message chains: no `a.b().c().d()` across layers; ask the nearest object for what you need.
 - Middle man: a class that only forwards calls is removed.
 
+## Environment
+
+- Environments and packages are managed with uv only: `uv sync --extra dev` creates `.venv`
+  from `pyproject.toml` and `uv.lock`; run everything through `uv run ...` or the `.venv`
+  interpreter. Do not `pip install` into system or conda Pythons, and do not hand-edit `.venv`.
+- Adding a dependency means editing `pyproject.toml` (core or the right extra) and committing the
+  regenerated `uv.lock`.
+
 ## Working practice
 
 - Tests run without the 1 GB data release: use `write_synthetic` (MaleCNS format) for fixtures.
   Every new module gets a test that exercises it end to end at small scale.
-- `pytest -q` must pass before every commit. Run the relevant script once on real data when the
+- `uv run pytest -q` must pass before every commit. Run the relevant script once on real data when the
   change touches loading, the retina, or training.
 - Keep the biology -> network mapping table in README.md in sync with the loader.
 - Commit messages: imperative subject line, body says why. No scp of code to remote machines;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import time
 from pathlib import Path
 
@@ -98,5 +99,9 @@ class Tracker:
 
 
 def save_checkpoint(agent, path: str | Path, **extra) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"agent": agent.state_dict(), **extra}, path)
+    """Atomic save: readers (viewer, scp) never see a half-written file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save({"agent": agent.state_dict(), **extra}, tmp)
+    os.replace(tmp, path)

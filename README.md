@@ -74,26 +74,40 @@ curl -o data/connectome-weights.feather      $B/connectome-weights-male-cns-v1.0
 The weights table has 152M rows; it is filtered in pyarrow batches to annotated neurons (about
 25 s the first time) and cached under `data/cache/`.
 
+## Setup
+
+The project is managed with [uv](https://docs.astral.sh/uv/): one `pyproject.toml`, one
+`uv.lock`, one `.venv` per checkout.
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh     # once per machine
+uv sync --extra dev                                  # creates .venv with games + rllib + test deps
+uv run pytest                                        # runs on a synthetic MaleCNS-format connectome, no download needed
+```
+
+`uv sync` alone installs only the core (torch, pandas, pyarrow); add `--extra games` for the
+Atari / classic-control suites and the viewer, `--extra rllib` for Ray. Prefix commands with
+`uv run` or activate `.venv` first. On a GPU box `uv sync` picks the CUDA build of torch that
+matches the platform.
+
 ## Usage
 
 ```bash
-pip install -e ".[dev]"            # add [rllib] for Ray RLlib
-pytest                             # runs on a synthetic MaleCNS-format connectome, no download needed
 
-python scripts/demo_stimulate.py --class gustatory                # who lights up after a sugar stimulus
-python scripts/play.py  --suite atari   --game pong               # whole CNS plays Pong (untrained)
-python scripts/play.py  --suite classic --game cartpole           # same model, vector observations
+uv run scripts/demo_stimulate.py --class gustatory                # who lights up after a sugar stimulus
+uv run scripts/play.py  --suite atari   --game pong               # whole CNS plays Pong (untrained)
+uv run scripts/play.py  --suite classic --game cartpole           # same model, vector observations
 
 # simple trainers (read nfly/rl/simple to learn how it works)
-python scripts/train_rl.py --algo ppo --suite atari --game pong --subset visual --envs 8 --updates 5000 --device cuda
-python scripts/train_rl.py --algo a2c --suite classic --game cartpole --subset visual_small
+uv run scripts/train_rl.py --algo ppo --suite atari --game pong --subset visual --envs 8 --updates 5000 --device cuda
+uv run scripts/train_rl.py --algo a2c --suite classic --game cartpole --subset visual_small
 
 # RLlib (scale out: env runners, GPUs, checkpoints, Tune)
-python scripts/train_rllib.py --algo PPO --suite atari --game pong --subset visual --gpus 1 --iters 200
+uv run scripts/train_rllib.py --algo PPO --suite atari --game pong --subset visual --gpus 1 --iters 200
 
 # watch it play in the browser (http://127.0.0.1:8000)
-python scripts/serve.py --suite atari --game pong --checkpoint runs/ppo-atari-pong.pt
-python scripts/serve.py --suite classic --game cartpole --policy random          # no data needed
+uv run scripts/serve.py --suite atari --game pong --checkpoint runs/ppo-atari-pong.pt
+uv run scripts/serve.py --suite classic --game cartpole --policy random          # no data needed
 ```
 
 ```python
