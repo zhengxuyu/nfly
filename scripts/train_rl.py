@@ -31,6 +31,8 @@ def main() -> None:
     p.add_argument("--lr", type=float)
     p.add_argument("--entropy", type=float)
     p.add_argument("--head-fan-in", type=int, help="PPO: scale head lr by this / n_readout (0 = no scaling)")
+    p.add_argument("--no-anneal", action="store_true", help="PPO: keep the learning rate constant")
+    p.add_argument("--no-adaptive-lr", action="store_true", help="PPO: no KL-based learning-rate scaling")
     p.add_argument("--out", help="checkpoint path (default runs/<algo>-<suite>-<game>.pt)")
     args = p.parse_args()
     torch.manual_seed(args.seed)
@@ -41,8 +43,13 @@ def main() -> None:
     print(agent.summary(), "| trainable parameters:", f"{sum(q.numel() for q in agent.parameters() if q.requires_grad):,}")
     config_cls, train = TRAINERS[args.algo]
     overrides = {k: v for k, v in dict(rollout=args.rollout, lr=args.lr, entropy=args.entropy).items() if v is not None}
-    if args.algo == "ppo" and args.head_fan_in is not None:
-        overrides["head_fan_in"] = args.head_fan_in or None
+    if args.algo == "ppo":
+        if args.head_fan_in is not None:
+            overrides["head_fan_in"] = args.head_fan_in or None
+        if args.no_anneal:
+            overrides["anneal_lr"] = False
+        if args.no_adaptive_lr:
+            overrides["adaptive_lr"] = False
     cfg = config_cls(updates=args.updates, out=args.out or f"runs/{args.algo}-{args.suite}-{args.game}.pt", **overrides)
     train(agent, venv, cfg, device=args.device, seed=args.seed)
 
