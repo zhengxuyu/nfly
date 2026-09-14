@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 
 from nfly import FlyAgent
@@ -10,13 +11,17 @@ from nfly.interface import ImageProjectionEncoder, RetinaEncoder, VectorEncoder,
 from nfly.suite import GameSuite, available_suites, get_suite, play_episode, register
 
 
-def test_sparse_recurrent_gradients_match_dense():
+@pytest.mark.parametrize("chunk", [7, 200, 10_000])
+def test_sparse_recurrent_gradients_match_dense(chunk):
     torch.manual_seed(0)
     n, e, b = 30, 200, 4
     pre, post = torch.randint(0, n, (e,)), torch.randint(0, n, (e,))
     w = torch.randn(e, requires_grad=True); h = torch.randn(b, n, requires_grad=True)
     g = torch.randn(b, n)
-    (_SparseRecurrent.apply(h, w, pre, post) * g).sum().backward()
+    y = _SparseRecurrent.apply(h, w, pre, post, chunk)
+    dense0 = torch.zeros(n, n).index_put((post, pre), w.detach(), accumulate=True)
+    assert torch.allclose(y, h.detach() @ dense0.T, atol=1e-5)
+    (y * g).sum().backward()
     w2 = w.detach().clone().requires_grad_(True); h2 = h.detach().clone().requires_grad_(True)
     dense = torch.zeros(n, n).index_put((post, pre), w2, accumulate=True)
     ((h2 @ dense.T) * g).sum().backward()

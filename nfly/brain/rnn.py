@@ -42,35 +42,53 @@ class InputDrive:
         return InputDrive(torch.as_tensor(idx, dtype=torch.long), d)
 
 
+EDGE_CHUNK = 2_000_000   # edges processed per chunk; transient memory is batch x chunk floats
+
+
 class _SparseRecurrent(torch.autograd.Function):
-    """y[b, post] += h[b, pre] * w   without storing the (B, E) message tensor for backward."""
+    """y[b, post] += h[b, pre] * w, processed in edge chunks so that neither the forward nor
+    the backward pass ever materialises a full (B, E) tensor, and only h (B, N) and w (E,) are
+    saved for backward."""
 
     @staticmethod
-    def forward(ctx, h, w, pre, post):
+    def forward(ctx, h, w, pre, post, chunk):
         ctx.save_for_backward(h, w, pre, post)
-        return torch.zeros_like(h).index_add_(1, post, h[:, pre] * w)
+        ctx.chunk = chunk
+        y = torch.zeros_like(h)
+        for a in range(0, pre.numel(), chunk):
+            b = a + chunk
+            y.index_add_(1, post[a:b], h[:, pre[a:b]] * w[a:b])
+        return y
 
     @staticmethod
     def backward(ctx, grad_y):
         h, w, pre, post = ctx.saved_tensors
-        grad_h = grad_w = None
-        if ctx.needs_input_grad[0]:                       # dL/dh[b, pre] += dL/dy[b, post] * w
-            grad_h = torch.zeros_like(h).index_add_(1, pre, grad_y[:, post] * w)
-        if ctx.needs_input_grad[1]:                       # dL/dw = sum_b h[b, pre] * dL/dy[b, post]
-            grad_w = (h[:, pre] * grad_y[:, post]).sum(0)
-        return grad_h, grad_w, None, None
+        chunk = ctx.chunk
+        need_h, need_w = ctx.needs_input_grad[0], ctx.needs_input_grad[1]
+        grad_h = torch.zeros_like(h) if need_h else None
+        grad_w = torch.empty_like(w) if need_w else None
+        for a in range(0, pre.numel(), chunk):
+            b = a + chunk
+            g = grad_y[:, post[a:b]]                                   # (B, chunk)
+            if need_h:                                                 # dL/dh[b, pre] += dL/dy[b, post] * w
+                grad_h.index_add_(1, pre[a:b], g * w[a:b])
+            if need_w:                                                 # dL/dw = sum_b h[b, pre] * dL/dy[b, post]
+                grad_w[a:b] = (h[:, pre[a:b]] * g).sum(0)
+        return grad_h, grad_w, None, None, None
 
 
 class ConnectomeRNN(nn.Module):
     def __init__(self, conn: Connectome, alpha_init: float = 0.1, activation: str = "relu",
                  learn_gain: bool = True, learn_alpha: bool = True, learn_bias: bool = True,
-                 global_scale: float = 1.0, bias_init: float = 0.0, h_max: float | None = 10.0):
+                 global_scale: float = 1.0, bias_init: float = 0.0, h_max: float | None = 10.0,
+                 edge_chunk: int = EDGE_CHUNK):
         """
         alpha_init   leak per step (1/time-constant), per neuron, learnable
         global_scale multiplier on the normalised connectome weights
         bias_init    resting drive.  >0 gives every neuron tonic activity so that inhibitory
                      inputs (e.g. histaminergic photoreceptors) can be *read* by ReLU units.
         h_max        saturation: activity is clamped to [0, h_max] to keep long rollouts finite
+        edge_chunk   edges per chunk in the sparse product (bounds transient memory)
         """
         super().__init__()
         self.n = conn.n_neurons
@@ -83,6 +101,7 @@ class ConnectomeRNN(nn.Module):
         self.log_gain = nn.Parameter(torch.zeros(e), requires_grad=learn_gain)
         self.bias = nn.Parameter(torch.full((n,), float(bias_init)), requires_grad=learn_bias)
         self.h_max = h_max
+        self.edge_chunk = edge_chunk
         a = torch.full((n,), float(alpha_init))
         self.alpha_logit = nn.Parameter(torch.log(a / (1 - a)), requires_grad=learn_alpha)
         self.act = {"relu": torch.relu, "tanh": torch.tanh, "softplus": nn.functional.softplus}[activation]
@@ -100,7 +119,7 @@ class ConnectomeRNN(nn.Module):
 
         Uses a custom autograd function so that backprop through time stores only h (B, N)
         per step instead of the (B, E) message tensor."""
-        return _SparseRecurrent.apply(h, w, self.pre, self.post)
+        return _SparseRecurrent.apply(h, w, self.pre, self.post, self.edge_chunk)
 
     # ---- dynamics --------------------------------------------------------------
     def step(self, h: torch.Tensor, u: torch.Tensor | None, w: torch.Tensor, alpha: torch.Tensor) -> torch.Tensor:
