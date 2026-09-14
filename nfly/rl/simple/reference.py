@@ -21,7 +21,7 @@ class MLPReference(nn.Module):
         super().__init__()
         d = int(np.prod(obs_space.shape))
         self.body = nn.Sequential(nn.Flatten(), nn.Linear(d, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh())
-        self.decoder = ActionDecoder.for_space(_Stub(hidden), act_space, readout_idx=torch.arange(hidden))
+        self.decoder = ActionDecoder.for_space(_Stub(hidden), act_space, readout_idx=torch.arange(hidden), readout_dim=None)
         self.decoder.norm = nn.Identity()
         self.value = nn.Linear(hidden, 1)
 

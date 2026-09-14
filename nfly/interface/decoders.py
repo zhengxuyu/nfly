@@ -47,19 +47,36 @@ class ReadoutNorm(nn.Module):
 
 
 class ActionDecoder(nn.Module):
+    """Readout neurons -> normalised activity -> (optional) k-dimensional linear bottleneck -> heads.
+
+    The bottleneck (`readout_dim`) is a plain linear map with no activation, so the whole decoder
+    stays linear in the readout activity; it only limits the rank of what the heads can use.
+    About 1,300 descending neurons carry a task signal that lives in a few dimensions, and
+    policy-gradient noise on 1,300 weights per action swamps it; searching in k dimensions is
+    far better conditioned. A behaviour-cloned linear head on the frozen network reaches
+    500/500 on CartPole, so the information is there; the bottleneck is about finding it."""
+
     idx: torch.Tensor    # (R,) readout node indices
 
-    def __init__(self, readout_idx: torch.Tensor):
+    def __init__(self, readout_idx: torch.Tensor, readout_dim: int | None = 32):
         super().__init__()
         self.register_buffer("idx", torch.as_tensor(readout_idx, dtype=torch.long))
         self.norm = ReadoutNorm(len(readout_idx))
+        self.proj = nn.Linear(len(readout_idx), readout_dim, bias=False) if readout_dim else nn.Identity()
+        if readout_dim:
+            nn.init.orthogonal_(self.proj.weight)          # rows orthonormal: unit-variance inputs stay unit-variance
 
     @property
     def n_readout(self) -> int:
         return int(self.idx.numel())
 
+    @property
+    def n_features(self) -> int:
+        """Width of what the heads see (readout_dim, or the number of readout neurons)."""
+        return self.proj.out_features if isinstance(self.proj, nn.Linear) else self.n_readout
+
     def features(self, h: torch.Tensor) -> torch.Tensor:
-        return self.norm(h[:, self.idx])
+        return self.proj(self.norm(h[:, self.idx]))
 
     def calibrate(self, h: torch.Tensor) -> None:
         """Set the readout normalisation from a probe of states h (M, N)."""
@@ -77,19 +94,20 @@ class ActionDecoder(nn.Module):
         return action.detach().cpu().numpy()
 
     @staticmethod
-    def for_space(conn: Connectome, space: gym.Space, readout_idx: torch.Tensor | None = None) -> "ActionDecoder":
+    def for_space(conn: Connectome, space: gym.Space, readout_idx: torch.Tensor | None = None,
+                  readout_dim: int | None = 32) -> "ActionDecoder":
         idx = readout_idx if readout_idx is not None else default_readout_nodes(conn)
         if isinstance(space, gym.spaces.Discrete):
-            return DiscreteDecoder(idx, int(space.n))
+            return DiscreteDecoder(idx, int(space.n), readout_dim)
         if isinstance(space, gym.spaces.Box):
-            return BoxDecoder(idx, space)
+            return BoxDecoder(idx, space, readout_dim)
         raise NotImplementedError(f"unsupported action space {space}")
 
 
 class DiscreteDecoder(ActionDecoder):
-    def __init__(self, readout_idx, n_actions: int):
-        super().__init__(readout_idx)
-        self.head = nn.Linear(self.n_readout, n_actions)
+    def __init__(self, readout_idx, n_actions: int, readout_dim: int | None = 32):
+        super().__init__(readout_idx, readout_dim)
+        self.head = nn.Linear(self.n_features, n_actions)
         nn.init.zeros_(self.head.weight); nn.init.zeros_(self.head.bias)
 
     def dist_inputs(self, feats):
@@ -102,11 +120,11 @@ class DiscreteDecoder(ActionDecoder):
 class BoxDecoder(ActionDecoder):
     """Diagonal Gaussian, mean squashed by tanh into the action bounds."""
 
-    def __init__(self, readout_idx, space: gym.spaces.Box):
-        super().__init__(readout_idx)
+    def __init__(self, readout_idx, space: gym.spaces.Box, readout_dim: int | None = 32):
+        super().__init__(readout_idx, readout_dim)
         d = int(np.prod(space.shape))
         self.shape = space.shape
-        self.mean = nn.Linear(self.n_readout, d)
+        self.mean = nn.Linear(self.n_features, d)
         self.log_std = nn.Parameter(torch.full((d,), -0.5))
         self.register_buffer("lo", torch.as_tensor(space.low).flatten().float())
         self.register_buffer("hi", torch.as_tensor(space.high).flatten().float())

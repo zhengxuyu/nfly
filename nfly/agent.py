@@ -35,16 +35,17 @@ class FlyAgent(nn.Module):
         self.brain, self.encoder, self.decoder = brain, encoder, decoder
         self.rnn_steps = rnn_steps
         self.input_gain = nn.Parameter(torch.tensor(float(input_gain)))
-        self.value = nn.Linear(decoder.n_readout, 1)
+        self.value = nn.Linear(decoder.n_features, 1)
 
     @classmethod
     def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
               input_gain: float = 5.0, alpha_init: float = 0.7, global_scale: float = 1.0, bias_init: float = 0.1,
               encoder: ObservationEncoder | None = None, decoder: ActionDecoder | None = None,
-              readout_idx: torch.Tensor | None = None, encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
+              readout_idx: torch.Tensor | None = None, readout_dim: int | None = 32,
+              encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
         enc = encoder or ObservationEncoder.for_space(conn, obs_space, **(encoder_kw or {}))
-        dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx)
+        dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim)
         agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain)
         agent.calibrate(obs_space)
         return agent
@@ -89,10 +90,10 @@ class FlyAgent(nn.Module):
         brain      lr * brain_scale: millions of edge gains under Adam each move by about lr per
                    update, which shifts the whole network; a smaller step keeps updates in the
                    trust region.
-        heads      lr * reference_fan_in / fan_in: with Adam the logit shift per update grows
-                   with the number of input features (about 1,300 readout neurons vs 64 in a
-                   small MLP), so the head rate is scaled to give the same shift as a
-                   reference_fan_in-unit network.
+        heads      lr * min(1, reference_fan_in / n_features): with Adam the logit shift per
+                   update grows with the number of head inputs, so heads reading more than
+                   reference_fan_in features get a proportionally smaller rate (no scaling
+                   with the default 32-dimensional readout bottleneck).
         the rest   lr (encoder projection, input gain, readout normalisation)."""
         brain, heads, rest = [], [], []
         for name, q in self.named_parameters():
@@ -104,7 +105,7 @@ class FlyAgent(nn.Module):
                 heads.append(q)
             else:
                 rest.append(q)
-        head_lr = lr * min(1.0, reference_fan_in / self.decoder.n_readout)
+        head_lr = lr * min(1.0, reference_fan_in / self.decoder.n_features)
         return [{"params": rest, "lr": lr}, {"params": heads, "lr": head_lr}, {"params": brain, "lr": lr * brain_scale}]
 
     def step(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None) -> tuple[torch.Tensor, torch.Tensor]:
