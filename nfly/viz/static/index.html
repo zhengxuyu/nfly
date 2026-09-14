@@ -148,7 +148,8 @@
     $('fps').value = s.fps; $('fpsv').textContent = s.fps; $('btnPause').textContent = s.paused ? 'Resume' : 'Pause';
     buildProbs(); drawTimeline();
     const es = new EventSource('/api/stream');
-    es.onmessage = m => onEvent(JSON.parse(m.data));
+    es.onmessage = m => { const e = JSON.parse(m.data); if (e.error) { setStatus('backend error: ' + e.error.split('\n').slice(-2).join(' '), true); return; } onEvent(e); };
+    if (s.error) setStatus('backend error: ' + s.error.split('\n').slice(-2).join(' '), true);
     es.onopen = () => setStatus('live');
     es.onerror = () => setStatus('stream disconnected, retrying', true);
   }

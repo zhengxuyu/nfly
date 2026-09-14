@@ -26,6 +26,8 @@ def _wait_for_steps(url, n=1, timeout=15.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         state = json.loads(_get(url + "/api/state")[2])
+        if state["error"]:
+            raise RuntimeError(state["error"])
         if state["step"] >= n:
             return state
         time.sleep(0.05)
@@ -52,6 +54,10 @@ def test_page_state_and_stream(server):
             line = r.readline()
         ev = json.loads(line[5:])
     assert ev["action_name"] in ("a0", "a1") and len(ev["frame_jpeg_b64"]) > 100 and "episode_return" in ev
+
+
+def test_start_is_idempotent(server):
+    assert server.start() is server
 
 
 def test_controls(server):

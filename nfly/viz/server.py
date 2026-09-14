@@ -28,6 +28,7 @@ class VizServer:
         handler = _make_handler(self)
         self.httpd = ThreadingHTTPServer((host, port), handler)
         self.httpd.daemon_threads = True
+        self._started = False
 
     @property
     def url(self) -> str:
@@ -35,8 +36,10 @@ class VizServer:
         return f"http://{host}:{port}"
 
     def start(self) -> "VizServer":
-        self.streamer.start()
-        threading.Thread(target=self.httpd.serve_forever, daemon=True, name="nfly-http").start()
+        if not self._started:
+            self._started = True
+            self.streamer.start()
+            threading.Thread(target=self.httpd.serve_forever, daemon=True, name="nfly-http").start()
         return self
 
     def serve_forever(self) -> None:

@@ -24,6 +24,7 @@ Each layer depends only on the layers to its left.
 | agent | `nfly.agent` | `FlyAgent = encoder -> brain -> decoder (+ value head)`, a recurrent policy with explicit state `h` |
 | suite | `nfly.suite` | `GameSuite` abstract base class + registry (`atari`, `classic`, `gym`); `play_episode` |
 | training | `nfly.rl` | `rl.simple`: readable pure-PyTorch A2C and PPO; `rl.rllib`: Ray RLlib `FlyRLModule` + config builders for PPO / APPO / IMPALA |
+| viewer | `nfly.viz` | browser viewer for any (policy, gym env) session: live frame, action probabilities, action timeline, pause / step / reset |
 
 The model layer does not know games exist; the suite layer does not know the model exists. They
 meet only through `observation_space` and `action_space`.
@@ -89,6 +90,10 @@ python scripts/train_rl.py --algo a2c --suite classic --game cartpole --subset v
 
 # RLlib (scale out: env runners, GPUs, checkpoints, Tune)
 python scripts/train_rllib.py --algo PPO --suite atari --game pong --subset visual --gpus 1 --iters 200
+
+# watch it play in the browser (http://127.0.0.1:8000)
+python scripts/serve.py --suite atari --game pong --checkpoint runs/ppo-atari-pong.pt
+python scripts/serve.py --suite classic --game cartpole --policy random          # no data needed
 ```
 
 ```python
@@ -141,6 +146,25 @@ Subclass `ObservationEncoder` (provide `idx` and `encode`) or `ActionDecoder` (p
 | --- | --- | --- |
 | whole CNS playing Pong | 30 ms / step | 8 ms / step |
 | `visual` subset, 8 envs, simple PPO/A2C | 41 steps / s | 236 steps / s |
+
+### Watch any session in the browser
+
+`nfly.viz` runs a (policy, env) session in a background thread and streams every step to a
+single-page viewer: the rendered frame, the action taken with its probability distribution, a
+colour-coded action timeline with reward ticks, and a step log. Pause, single-step, reset and
+change the playback speed from the page. Programmatic use:
+
+```python
+from nfly.viz import SessionConfig, serve
+server = serve(SessionConfig(suite="atari", game="breakout", subset="visual", checkpoint="runs/ppo.pt"), port=8000)
+print(server.url)          # open in a browser; server.stop() when done
+```
+
+The launch flow is the same for every front end: `SessionConfig` -> `build_session` -> a
+`Session` (env, policy, action names). Any object with `initial_state(batch)` and
+`act(obs, h, greedy)` is a valid policy (`RandomPolicy` is the smallest example), and any
+`gym.Env` created with `render_mode="rgb_array"` can be shown. The server is standard-library
+only (HTTP + Server-Sent Events), so it needs no extra dependency.
 
 ## Two training tracks
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import logging
 import queue
 import threading
 import time
+import traceback
 from typing import Any
 
 import cv2
@@ -14,6 +16,8 @@ import numpy as np
 import torch
 
 from .session import Session
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -79,6 +83,7 @@ class EpisodeStreamer(threading.Thread):
         self.history_size = history
         self.step_no = self.episode = 0
         self.episode_return = 0.0
+        self.error: str | None = None          # set if the loop died; shown by the page and tests
         self._paused = threading.Event()
         self._single_step = threading.Event()
         self._reset = threading.Event()
@@ -102,10 +107,18 @@ class EpisodeStreamer(threading.Thread):
             return {"suite": cfg.suite, "game": cfg.game, "policy": cfg.policy, "subset": cfg.subset,
                     "checkpoint": cfg.checkpoint, "action_names": self.session.action_names, "fps": self.fps,
                     "step": self.step_no, "episode": self.episode, "episode_return": self.episode_return,
-                    "paused": self.paused, "history": list(self.history)}
+                    "paused": self.paused, "error": self.error, "history": list(self.history)}
 
     # ---- main loop -------------------------------------------------------------------------------
     def run(self) -> None:
+        try:
+            self._loop()
+        except Exception:                      # a dead streamer must be visible, not silent
+            self.error = traceback.format_exc()
+            log.error("streamer stopped: %s", self.error)
+            self.broadcast.publish({"error": self.error})
+
+    def _loop(self) -> None:
         env, policy = self.session.env, self.session.policy
         obs, _ = env.reset(seed=self.session.config.seed)
         h = policy.initial_state(1)
