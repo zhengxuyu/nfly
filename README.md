@@ -1,33 +1,196 @@
 # nfly
 
-A fly connectome as a recurrent neural network that plays any Gymnasium game.
+**A standardised fly-brain neural network built from the Janelia MaleCNS v1.0 connectome, with
+standardised reinforcement-learning infrastructure and a live viewer. It speaks the OpenAI Gym /
+Gymnasium protocol, so it can be pointed at any task and trained in minutes.**
 
-nfly turns the Janelia **MaleCNS v1.0** release (male *Drosophila* brain + ventral nerve cord:
-166,700 annotated neurons, 10.5M connections with >= 3 synapses) into a sparse, sign-constrained
-rate RNN. Game frames land on the compound eye, activity flows through the real wiring, and
-descending / motor neurons are read out as actions.
+nfly turns the male *Drosophila* central nervous system (166,700 annotated neurons, 10.5M
+synaptic connections) into a sparse, sign-constrained recurrent network you can drop into any
+Gymnasium environment. Observations land on the fly's compound eye, activity flows through the
+real wiring, and descending / motor neurons are read out as actions.
 
 ```text
-observation --ObservationEncoder--> input neurons --ConnectomeRNN--> readout neurons --ActionDecoder--> action
- (gym space)   retina / projection      whole-CNS sparse dynamics    descending + motor      Categorical / Gaussian
+observation        (gym observation_space: frames, vectors, ...)
+     |
+     |  ObservationEncoder      retina sampling on the compound eye, or a linear projection
+     v
+input neurons      photoreceptors / sensory neurons of the connectome
+     |
+     |  ConnectomeRNN           whole-CNS sparse dynamics on the real wiring
+     v
+readout neurons    descending + motor neurons
+     |
+     |  ActionDecoder           Categorical (Discrete) or Gaussian (Box) head
+     v
+action             (gym action_space)
 ```
 
-## Layers
+## About the data: Janelia MaleCNS v1.0
 
-Each layer depends only on the layers to its left.
+[MaleCNS](https://male-cns.janelia.org/) is the first complete connectome of an adult male
+*Drosophila melanogaster* central nervous system: brain and ventral nerve cord imaged with
+electron microscopy, every neuron reconstructed and proofread, every synapse detected, and
+166,691 neurons annotated into 11,691 cell types with predicted neurotransmitters. It was
+produced by FlyEM (HHMI Janelia Research Campus) with the University of Cambridge, the MRC
+Laboratory of Molecular Biology and Google Research; version 1.0 was released on 8 June 2026
+under CC-BY 4.0. nfly uses three of its flat-connectome exports (body annotations, body
+neurotransmitters, connectome weights) from the
+[download page](https://male-cns.janelia.org/download/).
 
-| Layer | Package | Responsibility |
+Citation:
+
+> Berg, S., Beckett, I. R., Costa, M., Schlegel, P., Januszewski, M., Marin, E. C., Nern, A.,
+> et al. *Sexual dimorphism in the complete connectome of the Drosophila male central nervous
+> system.* Cell (2026); preprint bioRxiv 2025.10.09.680999,
+> <https://doi.org/10.1101/2025.10.09.680999>. Data: <https://male-cns.janelia.org/>
+
+## What is in the box
+
+| Component | Package | What it gives you |
 | --- | --- | --- |
-| data | `nfly.connectome` | MaleCNS feather files -> `Connectome` (neuron table + edge tensors); named subsets; synthetic fixtures |
-| model | `nfly.brain` | `ConnectomeRNN`: fixed wiring and signs, learnable per-edge gain, per-neuron leak and bias; stimulation experiments |
-| interface | `nfly.interface` | `ObservationEncoder` / `ActionDecoder` base classes, chosen from the env's spaces: images -> `RetinaEncoder`, vectors -> `VectorEncoder`; Discrete -> `DiscreteDecoder`, Box -> `BoxDecoder` |
-| agent | `nfly.agent` | `FlyAgent = encoder -> brain -> decoder (+ value head)`, a recurrent policy with explicit state `h` |
-| suite | `nfly.suite` | `GameSuite` abstract base class + registry (`atari`, `classic`, `gym`); `play_episode` |
-| training | `nfly.rl` | `rl.simple`: readable pure-PyTorch A2C and PPO; `rl.rllib`: Ray RLlib `FlyRLModule` + config builders for PPO / APPO / IMPALA |
-| viewer | `nfly.viz` | browser viewer for any (policy, gym env) session: live frame, action probabilities, action timeline, pause / step / reset |
+| **Fly network** | `nfly.connectome`, `nfly.brain` | MaleCNS v1.0 loader, named sub-networks, `ConnectomeRNN` (fixed wiring and signs, learnable per-edge gain, per-neuron leak and bias), stimulation experiments |
+| **Gym interface** | `nfly.interface`, `nfly.agent`, `nfly.suite` | Encoders / decoders chosen automatically from `observation_space` / `action_space`; `FlyAgent` recurrent policy; `GameSuite` base class with Atari, classic-control and generic-Gymnasium suites |
+| **RL infrastructure** | `nfly.rl.simple`, `nfly.rl.rllib` | Readable pure-PyTorch A2C / PPO for learning and quick experiments; Ray RLlib `FlyRLModule` + config builders (PPO / APPO / IMPALA) for producing models at scale |
+| **Viewer** | `nfly.viz` | Browser page streaming the rendered frame, action probabilities, action timeline and step log for any (policy, env) session, with pause / step / reset |
 
-The model layer does not know games exist; the suite layer does not know the model exists. They
-meet only through `observation_space` and `action_space`.
+Everything is layered one way (`connectome -> brain -> interface -> agent -> suite -> rl / viz`):
+the brain never sees a game, the suite never sees the brain, and a new task, sense, or algorithm
+is a new subclass in its own layer.
+
+## Installation
+
+### Environment
+
+The project is managed with [uv](https://docs.astral.sh/uv/): one `pyproject.toml`, one
+`uv.lock`, one `.venv` per checkout.
+
+```bash
+git clone https://github.com/zhengxuyu/nfly.git && cd nfly
+curl -LsSf https://astral.sh/uv/install.sh | sh        # uv, once per machine
+uv sync --extra dev                                     # .venv with torch, gymnasium, ale-py, ray, pytest
+uv run pytest -q                                        # 25 tests on a synthetic connectome, no download needed
+```
+
+`uv sync` alone installs only the core (torch, pandas, pyarrow); add `--extra games` for the
+suites and the viewer, `--extra rllib` for Ray. On a CUDA machine `uv sync` resolves the matching
+torch build automatically. Prefix commands with `uv run` or activate `.venv`.
+
+### Data
+
+Three public files from the MaleCNS v1.0 release (CC-BY 4.0, no login, 1.2 GB), into `data/`:
+
+```bash
+B=https://storage.googleapis.com/flyem-male-cns/v1.0/connectome-data/flat-connectome
+curl -o data/body-annotations.feather        $B/body-annotations-male-cns-v1.0-minconf-0.5.feather   # 14 MB
+curl -o data/body-neurotransmitters.feather  $B/body-neurotransmitters-male-cns-v1.0.feather         # 43 MB
+curl -o data/connectome-weights.feather      $B/connectome-weights-male-cns-v1.0-minconf-0.5.feather # 1.1 GB
+```
+
+The first load filters the 152M-row weights table down to annotated neurons (about 25 s) and
+caches the result under `data/cache/`. Check that everything is in place:
+
+```bash
+uv run scripts/demo_stimulate.py --class gustatory       # drive taste neurons, see which cell types light up
+```
+
+## Example: train the fly on Pong and watch it play
+
+Works on a laptop (CPU) end to end; a GPU makes training about 7x faster.
+
+### 1. Play untrained
+
+```bash
+uv run scripts/play.py --suite atari --game pong          # the whole CNS plays one Pong episode
+```
+
+### 2. Train
+
+Simple PPO (single process, easiest to read and to modify):
+
+```bash
+uv run scripts/train_rl.py --algo ppo --suite atari --game pong --subset visual \
+    --envs 8 --rollout 32 --updates 5000 --device cuda --out runs/ppo-atari-pong.pt
+```
+
+RLlib (multiple env runners, asynchronous APPO, checkpoints every 10 iterations):
+
+```bash
+uv run scripts/train_rllib.py --algo APPO --suite atari --game pong --subset visual \
+    --env-runners 8 --envs-per-runner 2 --gpus 1 --rnn-steps 1 --train-batch 4096 \
+    --entropy-coeff 0.01 --iters 2000 --out runs/rllib-pong
+```
+
+Both print one line per update / iteration (return, entropy, KL, timers) and save checkpoints
+atomically, so you can copy or view them while training continues. On a shared or remote GPU
+box, launch with `setsid nohup ... > runs/x.log 2>&1 < /dev/null &` and `tail -f` the log.
+
+### 3. Watch it play
+
+```bash
+uv run scripts/serve.py --suite atari --game pong --subset visual --checkpoint runs/ppo-atari-pong.pt
+# open http://127.0.0.1:8000
+```
+
+The page shows the frame, the six action probabilities, a colour-coded action timeline with
+reward ticks and a step log; pause, single-step, reset and change the playback speed from the
+page. Without a checkpoint you get the untrained brain; with `--policy random` you can check any
+env renders before loading a brain.
+
+### 4. Swap the task
+
+```bash
+uv run scripts/play.py --suite classic --game cartpole                      # vector observations, same brain
+uv run scripts/train_rl.py --algo ppo --suite gym --game LunarLander-v3    # any registered Gymnasium id
+```
+
+No model code changes: encoders and decoders are picked from the env's spaces.
+
+## Extending
+
+### Your own game collection
+
+```python
+from nfly.suite import GameSuite, register
+
+@register("mygames")
+class MySuite(GameSuite):
+    def games(self):
+        return ["level1", "level2"]
+
+    def make(self, game, seed=None, render_mode=None, **kw):
+        return self.finish(MyEnv(game, render_mode=render_mode), seed)   # any gym.Env
+```
+
+`make_vector`, `spaces` and `finish` come from the base class; every script accepts
+`--suite mygames --game level1`.
+
+### Your own senses or muscles
+
+Subclass `ObservationEncoder` (provide `idx`, the neurons you drive, and `encode`) or
+`ActionDecoder` (provide `dist_inputs` and `distribution`) and pass them to
+`FlyAgent.build(..., encoder=..., decoder=...)`.
+
+### Your own algorithm
+
+`nfly.rl.simple.common` has rollout collection, GAE and replay; a new trainer is a config
+dataclass plus a loop (see `ppo.py`, about 80 lines). For RLlib, `FlyRLModule` already
+implements the stateful `TorchRLModule` + `ValueFunctionAPI` contract, so any value-based RLlib
+algorithm works through `build_config(algo, ...)`.
+
+### Programmatic use
+
+```python
+from nfly import load_malecns, select_subset, FlyAgent
+from nfly.suite import get_suite, play_episode
+from nfly.viz import SessionConfig, serve
+
+conn = select_subset(load_malecns("data"), "visual")            # all | brain | visual | visual_small
+env = get_suite("atari").make("breakout", seed=0)
+agent = FlyAgent.build(conn, env.observation_space, env.action_space)
+print(play_episode(agent, env).ret)
+
+server = serve(SessionConfig(suite="atari", game="breakout", checkpoint="runs/ppo.pt"), port=8000)
+```
 
 ## Biology -> network
 
@@ -51,164 +214,55 @@ h[t+1] = (1 - alpha) * h[t] + alpha * min( ReLU( W h[t] + b + u[t] ), h_max )
 W[post, pre] = sign(pre) * (syn / sum_in syn) * exp(g_edge)        g_edge learnable, initialised to 0
 ```
 
-The resting bias b starts at 0.1. Photoreceptors release only histamine (inhibitory), so if every
-neuron started at 0 no inhibitory input could ever be read by a ReLU unit. With a little tonic
-activity, light shows up as a *decrease* downstream, matching real L1/L2 responses. At global gain
-1.0 the whole CNS has a stable baseline (about 98% of neurons active, mean 0.1); gain 5 diverges.
+The resting bias b starts at 0.1: photoreceptors release only histamine (inhibitory), so with all
+neurons at 0 no inhibitory input could ever be read by a ReLU unit. With a little tonic activity,
+light shows up as a decrease downstream, matching real L1/L2 responses. At global gain 1.0 the
+whole CNS keeps a stable baseline; gain 5 diverges.
 
 The sparse product is a gather + `index_add` with a custom backward, processed in edge chunks, so
 backprop through time stores only the (batch x N) state per step and never a (batch x edges)
-tensor. That keeps whole-CNS training inside ~1.5 GB of GPU memory.
+tensor. Derived edge weights are computed once per unroll and cached during inference.
 
-## Data
+### Sub-networks
 
-Three public files on Google Storage (CC-BY 4.0, no login). Put them in `data/`:
+| Name | Content | Neurons | Edges (>= 3 syn) |
+| --- | --- | --- | --- |
+| all | whole central nervous system | 166,700 | 10.5M |
+| brain | without the ventral nerve cord | ~146,000 | |
+| visual | optic lobes + visual projection + central brain + descending neurons | 138,743 | 8.4M |
+| visual_small | optic lobes + visual projection + descending neurons | 106,579 | 5.2M |
 
-```bash
-B=https://storage.googleapis.com/flyem-male-cns/v1.0/connectome-data/flat-connectome
-curl -o data/body-annotations.feather        $B/body-annotations-male-cns-v1.0-minconf-0.5.feather   # 14 MB
-curl -o data/body-neurotransmitters.feather  $B/body-neurotransmitters-male-cns-v1.0.feather         # 43 MB
-curl -o data/connectome-weights.feather      $B/connectome-weights-male-cns-v1.0-minconf-0.5.feather # 1.1 GB
-```
+## What this is and is not
 
-The weights table has 152M rows; it is filtered in pyarrow batches to annotated neurons (about
-25 s the first time) and cached under `data/cache/`.
-
-## Setup
-
-The project is managed with [uv](https://docs.astral.sh/uv/): one `pyproject.toml`, one
-`uv.lock`, one `.venv` per checkout.
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh     # once per machine
-uv sync --extra dev                                  # creates .venv with games + rllib + test deps
-uv run pytest                                        # runs on a synthetic MaleCNS-format connectome, no download needed
-```
-
-`uv sync` alone installs only the core (torch, pandas, pyarrow); add `--extra games` for the
-Atari / classic-control suites and the viewer, `--extra rllib` for Ray. Prefix commands with
-`uv run` or activate `.venv` first. On a GPU box `uv sync` picks the CUDA build of torch that
-matches the platform.
-
-## Usage
-
-```bash
-
-uv run scripts/demo_stimulate.py --class gustatory                # who lights up after a sugar stimulus
-uv run scripts/play.py  --suite atari   --game pong               # whole CNS plays Pong (untrained)
-uv run scripts/play.py  --suite classic --game cartpole           # same model, vector observations
-
-# simple trainers (read nfly/rl/simple to learn how it works)
-uv run scripts/train_rl.py --algo ppo --suite atari --game pong --subset visual --envs 8 --updates 5000 --device cuda
-uv run scripts/train_rl.py --algo a2c --suite classic --game cartpole --subset visual_small
-
-# RLlib (scale out: env runners, GPUs, checkpoints, Tune)
-uv run scripts/train_rllib.py --algo PPO --suite atari --game pong --subset visual --gpus 1 --iters 200
-
-# watch it play in the browser (http://127.0.0.1:8000)
-uv run scripts/serve.py --suite atari --game pong --checkpoint runs/ppo-atari-pong.pt
-uv run scripts/serve.py --suite classic --game cartpole --policy random          # no data needed
-```
-
-```python
-from nfly import load_malecns, select_subset, FlyAgent
-from nfly.suite import get_suite, play_episode
-
-conn = select_subset(load_malecns("data"), "visual")            # all | brain | visual | visual_small
-env = get_suite("atari").make("breakout", seed=0)
-agent = FlyAgent.build(conn, env.observation_space, env.action_space)
-print(play_episode(agent, env).ret)
-```
-
-### Bring your own game
-
-Any Gymnasium env works as is: `get_suite("gym").make("LunarLander-v3")`. To package a
-collection, implement two methods:
-
-```python
-from nfly.suite import GameSuite, register
-
-@register("mygames")
-class MySuite(GameSuite):
-    def games(self):
-        return ["level1", "level2"]
-
-    def make(self, game, seed=None, render_mode=None, **kw):
-        return self.finish(MyEnv(game, render_mode=render_mode), seed)   # any gym.Env
-```
-
-`make_vector`, `spaces` and `finish` come from the base class. The agent only looks at
-`observation_space` and `action_space`; no model code changes.
-
-### Bring your own senses or muscles
-
-Subclass `ObservationEncoder` (provide `idx` and `encode`) or `ActionDecoder` (provide
-`dist_inputs` and `distribution`) and pass it to `FlyAgent.build(..., encoder=..., decoder=...)`.
-
-### Subsets
-
-| Name | Content | Neurons |
-| --- | --- | --- |
-| all | whole central nervous system | 166,700 |
-| brain | without the ventral nerve cord | ~146,000 |
-| visual | optic lobes + visual projection + central brain + descending neurons | ~139,000 |
-| visual_small | optic lobes + visual projection + descending neurons | ~107,000 |
+nfly reproduces the fly's **wiring**: which neurons exist, who connects to whom with how many
+synapses, and the predicted sign of each connection. Everything else is a deliberate
+simplification: one scalar rate per neuron, no spikes, ion channels, gap junctions, glia,
+neuromodulation or plasticity rules; game pixels reach the photoreceptors through an assumed
+hex-to-image mapping; the descending-neuron-to-action readout is learned; and training changes
+edge gains, biases and time constants, so a trained model is connectome-*constrained*, not a
+copy of the animal.
 
 ## Performance
 
 | Scenario | CPU (M-series laptop) | RTX 5090 |
 | --- | --- | --- |
-| whole CNS playing Pong | 30 ms / step | 8 ms / step |
-| `visual` subset, 8 envs, simple PPO/A2C | 41 steps / s | 236 steps / s |
+| whole CNS playing Pong (inference) | 30 ms / step | 8 ms / step |
+| `visual` subset, simple PPO, 8 envs | 41 steps / s | 220 steps / s |
+| `visual` subset, 32-step unroll fwd+bwd, batch 8 | | 0.9 s (about 280 steps / s) |
 
-### Watch any session in the browser
-
-`nfly.viz` runs a (policy, env) session in a background thread and streams every step to a
-single-page viewer: the rendered frame, the action taken with its probability distribution, a
-colour-coded action timeline with reward ticks, and a step log. Pause, single-step, reset and
-change the playback speed from the page. Programmatic use:
-
-```python
-from nfly.viz import SessionConfig, serve
-server = serve(SessionConfig(suite="atari", game="breakout", subset="visual", checkpoint="runs/ppo.pt"), port=8000)
-print(server.url)          # open in a browser; server.stop() when done
-```
-
-The launch flow is the same for every front end: `SessionConfig` -> `build_session` -> a
-`Session` (env, policy, action names). Any object with `initial_state(batch)` and
-`act(obs, h, greedy)` is a valid policy (`RandomPolicy` is the smallest example), and any
-`gym.Env` created with `render_mode="rgb_array"` can be shown. The server is standard-library
-only (HTTP + Server-Sent Events), so it needs no extra dependency.
-
-## Two training tracks
-
-- **`nfly.rl.simple`** is for reading and quick experiments: A2C and recurrent PPO in about 80
-  lines each, sharing rollout collection, GAE and replay in `common.py`. No dependency beyond
-  torch and gymnasium.
-- **`nfly.rl.rllib`** is for producing models: `FlyRLModule` wraps the agent as a stateful RLlib
-  module, `build_config("PPO" | "APPO" | "IMPALA", ...)` returns a ready `AlgorithmConfig`.
-  Note that RLlib stores the recurrent state (one float per neuron) at every time step of every
-  episode; with the `visual` subset that is 0.5 MB per step, so keep `rollout_fragment_length`
-  and the number of env runners moderate.
+Training throughput is bound by the sparse product over millions of edges, not by the RL
+framework. `--rnn-steps 1`, the `visual_small` subset and asynchronous APPO are the three knobs
+that buy the most speed. RLlib stores the recurrent state (one float per neuron) at every time
+step of every episode, so keep `--max-seq-len` moderate.
 
 ## Code principles
 
 The project follows the code-smell catalogue at
-<https://refactoring.guru/refactoring/smells>. The checklist we apply to every change lives in
+<https://refactoring.guru/refactoring/smells>. The checklist applied to every change lives in
 [CLAUDE.md](CLAUDE.md), together with the language rule (all committed text in English, ASCII
-source) and the one-directional layer rule. In short:
-
-- **Bloaters**: short functions, one reason to change per class, dataclasses instead of tuples and
-  dicts, config objects instead of long parameter lists.
-- **OO abusers**: type dispatch lives in one factory; no temporary fields; siblings share one
-  interface.
-- **Change preventers**: a new game, sense or algorithm touches only its own layer; every rule or
-  constant exists once.
-- **Dispensables**: no narrating comments, duplicate blocks, dead code or speculative options.
-- **Couplers**: no reaching into other modules' internals, no message chains across layers, no
-  pass-through classes.
+source), the one-directional layer rule and the uv-only environment rule.
 
 ## License and citation
 
-Code: license to be chosen before the public release (MIT suggested). Data: MaleCNS v1.0, CC-BY 4.0, FlyEM (HHMI Janelia), University of Cambridge, MRC LMB,
-Google Research. Please cite the MaleCNS release when you publish results built on this model.
+Code: [MIT](LICENSE). Data: MaleCNS v1.0, CC-BY 4.0 (see [About the data](#about-the-data-janelia-malecns-v10)
+for the citation). Please cite the MaleCNS paper when you publish results built on this model.
