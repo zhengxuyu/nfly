@@ -65,6 +65,15 @@ class GameSuite(ABC):
     def _thunk(self, game, seed, **kw):
         return lambda: self.make(game, seed=seed, **kw)
 
+    @staticmethod
+    def finish(env: gym.Env, seed: int | None) -> gym.Env:
+        """Wrap with episode statistics and seed; call at the end of every `make`."""
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        if seed is not None:
+            env.reset(seed=seed)
+            env.action_space.seed(seed)
+        return env
+
     def __repr__(self) -> str:
         return f"{type(self).__name__}(games={self.games()})"
 
@@ -83,7 +92,4 @@ class GymSuite(GameSuite):
         env = gym.make(game, render_mode=render_mode, **kw)
         for w in self.wrappers:
             env = w(env)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if seed is not None:
-            env.reset(seed=seed); env.action_space.seed(seed)
-        return env
+        return self.finish(env, seed)

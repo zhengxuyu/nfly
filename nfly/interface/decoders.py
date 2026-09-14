@@ -34,6 +34,10 @@ class ActionDecoder(nn.Module):
     def features(self, h: torch.Tensor) -> torch.Tensor:
         return self.norm(h[:, self.idx])
 
+    def dist_inputs(self, feats: torch.Tensor) -> torch.Tensor:
+        """Raw distribution parameters (logits, or [mean, log_std]) - what RL libraries want."""
+        raise NotImplementedError
+
     def distribution(self, feats: torch.Tensor) -> Distribution:
         raise NotImplementedError
 
@@ -57,8 +61,11 @@ class DiscreteDecoder(ActionDecoder):
         self.head = nn.Linear(self.n_readout, n_actions)
         nn.init.zeros_(self.head.weight); nn.init.zeros_(self.head.bias)
 
+    def dist_inputs(self, feats):
+        return self.head(feats)
+
     def distribution(self, feats):
-        return Categorical(logits=self.head(feats))
+        return Categorical(logits=self.dist_inputs(feats))
 
 
 class BoxDecoder(ActionDecoder):
@@ -73,10 +80,14 @@ class BoxDecoder(ActionDecoder):
         self.register_buffer("lo", torch.as_tensor(space.low).flatten().float())
         self.register_buffer("hi", torch.as_tensor(space.high).flatten().float())
 
-    def distribution(self, feats):
+    def dist_inputs(self, feats):
         mu = torch.tanh(self.mean(feats))
         mu = self.lo + (mu + 1) / 2 * (self.hi - self.lo)
-        return Independent(Normal(mu, self.log_std.exp()), 1)
+        return torch.cat([mu, self.log_std.expand_as(mu)], dim=-1)
+
+    def distribution(self, feats):
+        mu, log_std = self.dist_inputs(feats).chunk(2, dim=-1)
+        return Independent(Normal(mu, log_std.exp()), 1)
 
     def to_env(self, action):
         a = torch.max(torch.min(action, self.hi), self.lo)

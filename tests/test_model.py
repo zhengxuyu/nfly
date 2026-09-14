@@ -74,4 +74,5 @@ def test_subset(tmp_path):
 def test_stimulate_runs(tmp_path):
     c = make(tmp_path)
     res = stimulate(c, ConnectomeRNN(c, global_scale=5.0), c.input_nodes()[:5], steps=8, top=5)
-    assert len(res["active_per_step"]) == 9 and not res["top_neurons"]["stimulated"].any()
+    assert len(res.active_per_step) == 9 and not res.top_neurons["stimulated"].any()
+    assert "top downstream" in res.report()

@@ -32,10 +32,7 @@ class AtariSuite(GameSuite):
         env = gym.wrappers.AtariPreprocessing(env, noop_max=self.noop_max, frame_skip=self.frame_skip,
                                               screen_size=self.frame_size, grayscale_obs=True, scale_obs=True,
                                               terminal_on_life_loss=self.terminal_on_life_loss)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if seed is not None:
-            env.reset(seed=seed); env.action_space.seed(seed)
-        return env
+        return self.finish(env, seed)
 
     @staticmethod
     def action_meanings(env: gym.Env) -> list[str]:

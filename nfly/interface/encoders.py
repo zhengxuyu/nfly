@@ -56,6 +56,14 @@ def _to_gray_2d(obs: torch.Tensor, space: gym.spaces.Box) -> torch.Tensor:
     return x
 
 
+def _finite_bounds(space: gym.Space) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """(low, high - low) of a bounded Box, else (None, None)."""
+    if isinstance(space, gym.spaces.Box) and np.all(np.isfinite(space.low)) and np.all(np.isfinite(space.high)):
+        lo, hi = torch.as_tensor(space.low).flatten().float(), torch.as_tensor(space.high).flatten().float()
+        return lo, (hi - lo).clamp_min(1e-6)
+    return None, None
+
+
 def _sensory_nodes(conn: Connectome, n: int | None, seed: int) -> np.ndarray:
     idx = conn.input_nodes().numpy()
     if n is not None and n < len(idx):
@@ -101,11 +109,9 @@ class VectorEncoder(ObservationEncoder):
         self.d = int(space.n) if isinstance(space, gym.spaces.Discrete) else int(np.prod(space.shape))
         self.register_buffer("idx", torch.as_tensor(_sensory_nodes(conn, n_inputs, seed), dtype=torch.long))
         self.proj = nn.Linear(self.d, self.n_inputs)
-        if isinstance(space, gym.spaces.Box) and np.all(np.isfinite(space.low)) and np.all(np.isfinite(space.high)):
-            lo, hi = torch.as_tensor(space.low).flatten().float(), torch.as_tensor(space.high).flatten().float()
-            self.register_buffer("lo", lo); self.register_buffer("scale", (hi - lo).clamp_min(1e-6))
-        else:
-            self.lo = self.scale = None
+        lo, scale = _finite_bounds(space)
+        self.register_buffer("lo", lo)
+        self.register_buffer("scale", scale)
 
     def encode(self, obs: torch.Tensor) -> torch.Tensor:
         if isinstance(self.space, gym.spaces.Discrete):

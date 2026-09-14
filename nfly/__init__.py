@@ -1,4 +1,4 @@
-"""nfly — a fly connectome as a recurrent neural network, playing any Gymnasium game.
+"""nfly - a fly connectome as a recurrent neural network, playing any Gymnasium game.
 
 Layers (each depends only on the ones above it):
     nfly.connectome   data: Janelia MaleCNS release -> Connectome tensors

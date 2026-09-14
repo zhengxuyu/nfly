@@ -46,14 +46,18 @@ class FlyAgent(nn.Module):
     def initial_state(self, batch: int) -> torch.Tensor:
         return torch.zeros(batch, self.brain.n, device=self.input_gain.device)
 
-    def forward(self, obs: torch.Tensor, h: torch.Tensor):
-        """obs (B, ...) raw observation batch; h (B, N).  Returns (action distribution, value (B,), new h)."""
+    def step(self, obs: torch.Tensor, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """One env step: obs (B, ...) and state h (B, N) -> readout features (B, R) and new h."""
         drive = self.encoder.encode(obs) * self.input_gain
         u = torch.zeros_like(h).index_copy(1, self.encoder.idx, drive)
         w, alpha = self.brain.edge_weights(), self.brain.alpha()
         for _ in range(self.rnn_steps):
             h = self.brain.step(h, u, w, alpha)
-        feats = self.decoder.features(h)
+        return self.decoder.features(h), h
+
+    def forward(self, obs: torch.Tensor, h: torch.Tensor):
+        """Returns (action distribution, value (B,), new h)."""
+        feats, h = self.step(obs, h)
         return self.decoder.distribution(feats), self.value(feats).squeeze(-1), h
 
     def act(self, obs, h, greedy: bool = False):
