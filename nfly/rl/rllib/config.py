@@ -32,7 +32,9 @@ def build_config(algo: str = "PPO", suite: str = "atari", game: str = "pong", da
                            rollout_fragment_length=max_seq_len)
               .learners(num_learners=0, num_gpus_per_learner=num_gpus)
               .rl_module(rl_module_spec=module)
-              .training(train_batch_size_per_learner=train_batch_size, lr=lr, **training_kw))
+              # minibatch_size bounds the learner's unroll batch for every algorithm; without it
+              # APPO / IMPALA unroll the whole train batch at once and run out of GPU memory
+              .training(train_batch_size_per_learner=train_batch_size, minibatch_size=minibatch_size, lr=lr, **training_kw))
     if algo == "PPO":
-        config = config.training(minibatch_size=minibatch_size, num_epochs=num_epochs)
+        config = config.training(num_epochs=num_epochs)
     return config
