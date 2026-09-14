@@ -265,6 +265,26 @@ framework. `--rnn-steps 1`, the `visual_small` subset and asynchronous APPO are 
 that buy the most speed. RLlib stores the recurrent state (one float per neuron) at every time
 step of every episode, so keep `--max-seq-len` moderate.
 
+## Benchmarks
+
+Scores obtained so far, recorded as they are. All runs use the MaleCNS `visual` sub-network
+(138,743 neurons, 8.4M edges) on one shared RTX 5090; "return" is the mean episode return of the
+last 20 episodes at the end of the run. Pong reference points: random policy about -20.7,
+human about 14.6 (Mnih et al. 2015).
+
+| Game | Trainer | Config | Env steps | Return | Entropy at end | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pong | simple A2C | rnn_steps 2, 8 envs, rollout 16, lr 3e-4, entropy 0.01 | 321k | -20.5 | 0.64 | policy collapsed to two actions within 100k steps, partial recovery |
+| Pong | simple PPO | rnn_steps 2, 8 envs, rollout 32, 3 epochs, clip 0.2, entropy 0.01 | 289k | -19.8 | 0.55 | slower collapse than A2C, no score gain |
+| Pong | RLlib PPO | rnn_steps 2, 8 runners x 2 envs, batch 4096, minibatch 256 | 41k | -20.6 | 1.66 | stopped by a checkpoint-path bug (fixed) |
+| Pong | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 120k (running) | -20.5 | 1.68 | entropy stable so far; 160 env steps / s |
+
+None of these runs has learned Pong yet: they are all inside the first few hundred thousand
+steps, where a standard CNN policy also still scores about -21. The table is here to be
+updated, including negative results. To add a row, run one of the training commands above,
+read the last log line (simple trainers) or the last `{"iter": ...}` line (RLlib), and record
+the config, env steps, return and entropy.
+
 ## Code principles
 
 The project follows the code-smell catalogue at
