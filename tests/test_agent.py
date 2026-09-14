@@ -198,3 +198,13 @@ def test_readout_bottleneck_shapes():
     # head lr is unscaled with the bottleneck, scaled without it
     assert a.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3)
     assert full.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3 * min(1.0, 64 / full.decoder.n_readout))
+
+
+def test_episodes_start_from_the_resting_state():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
+    h0 = a.initial_state(2)
+    assert h0.shape == (2, c.n_neurons) and h0.abs().sum() > 0          # not silence
+    with torch.no_grad():                                                # and (nearly) a fixed point with no input
+        h1 = a.brain.step(h0, None, a.brain.weights())
+    assert torch.allclose(h1, h0, atol=1e-3)

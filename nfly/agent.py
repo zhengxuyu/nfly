@@ -36,6 +36,7 @@ class FlyAgent(nn.Module):
         self.rnn_steps = rnn_steps
         self.input_gain = nn.Parameter(torch.tensor(float(input_gain)))
         self.value = nn.Linear(decoder.n_features, 1)
+        self.register_buffer("h_rest", torch.zeros(brain.n))    # resting state; episodes start here
 
     @classmethod
     def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
@@ -51,12 +52,14 @@ class FlyAgent(nn.Module):
         return agent
 
     @torch.no_grad()
-    def calibrate(self, obs_space: gym.Space, n_probe: int = 16, steps: int = 64, seed: int = 0) -> None:
-        """Set the readout normalisation from a probe: `n_probe` parallel runs of `steps` env
-        steps, a fresh random observation every step, keeping the readout state of every step.
-        Keeping all steps matters: the network's activity drifts for tens of steps after a reset
-        by far more than any observation changes it, and the scale must cover that drift.
-        Unbounded Box values are clipped to +-3."""
+    def calibrate(self, obs_space: gym.Space, n_probe: int = 16, steps: int = 64, rest_steps: int = 64,
+                  seed: int = 0) -> None:
+        """Set the resting state and the readout normalisation.
+
+        The resting state is the activity after `rest_steps` steps with no input; episodes start
+        there. The normalisation comes from a probe: `n_probe` parallel runs of `steps` env steps
+        from the resting state, a fresh random observation every step, keeping the readout state
+        of every step. Unbounded Box values are clipped to +-3."""
         rng = np.random.default_rng(seed)
         obs_space.seed(int(rng.integers(2**31)))
         unbounded = isinstance(obs_space, gym.spaces.Box) and not (np.all(np.isfinite(obs_space.low)) and np.all(np.isfinite(obs_space.high)))
@@ -65,8 +68,12 @@ class FlyAgent(nn.Module):
             probe = np.stack([obs_space.sample() for _ in range(n_probe)])
             return torch.as_tensor(np.clip(probe, -3, 3) if unbounded else probe, device=self.input_gain.device)
 
-        h = self.initial_state(n_probe)
         weights = self.brain.weights()
+        h = torch.zeros(1, self.brain.n, device=self.input_gain.device)
+        for _ in range(rest_steps):                              # settle with no input: the resting state
+            h = self.brain.step(h, None, weights)
+        self.h_rest.copy_(h[0])
+        h = self.initial_state(n_probe)
         states = []
         for _ in range(steps):
             _, h = self.step(sample(), h, weights)
@@ -78,7 +85,10 @@ class FlyAgent(nn.Module):
         return self.brain.n
 
     def initial_state(self, batch: int) -> torch.Tensor:
-        return torch.zeros(batch, self.brain.n, device=self.input_gain.device)
+        """Episodes start from the network's resting state, not from silence: starting at zero
+        makes the first ~10 steps of every episode a large transient (readout features 10x their
+        steady-state scale) that dominates policy-gradient updates."""
+        return self.h_rest.unsqueeze(0).expand(batch, -1).clone()
 
     def weights(self) -> Weights:
         """Derived parameters for an unroll; trainers compute this once per replayed segment."""

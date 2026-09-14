@@ -40,7 +40,7 @@ class FlyRLModule(TorchRLModule, ValueFunctionAPI, TargetNetworkAPI):
                                     rnn_steps=cfg.get("rnn_steps", 4))
 
     def get_initial_state(self) -> dict[str, np.ndarray]:
-        return {STATE_KEY: np.zeros(self.agent.n_neurons, dtype=np.float32)}
+        return {STATE_KEY: self.agent.h_rest.detach().cpu().numpy().astype(np.float32)}
 
     def _dist_cls(self):
         return TorchCategorical if isinstance(self.action_space, gym.spaces.Discrete) else TorchDiagGaussian
