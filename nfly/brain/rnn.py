@@ -112,7 +112,7 @@ class ConnectomeRNN(nn.Module):
         self.bias = nn.Parameter(torch.full((n,), float(bias_init)), requires_grad=learn_bias)
         self.h_max = h_max
         self.edge_chunk = edge_chunk
-        self._cached: tuple[int, Weights] | None = None
+        self._cached: tuple[tuple, Weights] | None = None
         a = torch.full((n,), float(alpha_init))
         self.alpha_logit = nn.Parameter(torch.log(a / (1 - a)), requires_grad=learn_alpha)
         self.act = {"relu": torch.relu, "tanh": torch.tanh, "softplus": nn.functional.softplus}[activation]
@@ -131,9 +131,10 @@ class ConnectomeRNN(nn.Module):
         load_state_dict), which is what `_version` tracks."""
         if torch.is_grad_enabled():
             return Weights(self.edge_weights(), self.alpha())
-        version = self.log_gain._version + self.alpha_logit._version
-        if self._cached is None or self._cached[0] != version:
-            self._cached = (version, Weights(self.edge_weights(), self.alpha()))
+        # in-place updates bump _version; .to(device/dtype) replaces the storage (data_ptr)
+        key = (self.log_gain.data_ptr(), self.log_gain._version, self.alpha_logit.data_ptr(), self.alpha_logit._version)
+        if self._cached is None or self._cached[0] != key:
+            self._cached = (key, Weights(self.edge_weights(), self.alpha()))
         return self._cached[1]
 
     def recurrent_input(self, h: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
