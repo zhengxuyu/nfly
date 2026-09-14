@@ -51,8 +51,12 @@ def main() -> None:
     for i in range(1, args.iters + 1):
         r = algo.train()
         er = r.get("env_runners", {})
+        timers = {k: round(float(v), 1) for k, v in r.get("timers", {}).items() if isinstance(v, (int, float))}
+        learner = r.get("learners", {}).get("default_policy", {})
         print(json.dumps({"iter": i, "return_mean": _num(er.get("episode_return_mean")), "episodes": _num(er.get("num_episodes")),
-                          "steps": _num(r.get("num_env_steps_sampled_lifetime")), "seconds": _num(r.get("time_this_iter_s"))}), flush=True)
+                          "steps": _num(r.get("num_env_steps_sampled_lifetime")), "seconds": round(float(r.get("time_this_iter_s", 0)), 1),
+                          "entropy": _num(learner.get("entropy")), "kl": _num(learner.get("mean_kl_loss")),
+                          "timers": timers}), flush=True)
         if i % args.checkpoint_every == 0 or i == args.iters:
             print("checkpoint:", algo.save_to_path(args.out), flush=True)
 
