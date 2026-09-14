@@ -111,8 +111,6 @@ def compound_eye(side):
         for col in range(count):
             theta = TAU * (col+0.5*(row % 2))/count
             normal = Vector((math.sin(phi)*math.cos(theta), math.sin(phi)*math.sin(theta), math.cos(phi)))
-            if normal.x * side < -0.12:
-                continue
             p = center + Vector(tuple(r*n*1.006 for r, n in zip(radii, normal)))
             tangent = normal.cross(Vector((0, 0, 1))).normalized()
             bitangent = normal.cross(tangent).normalized()
@@ -132,6 +130,7 @@ def abdomen():
         t = i/80
         y = 0.26 + 1.5*t
         radius = 0.49 * (math.sin(math.pi*(0.12+0.87*t))**0.65)
+        radius *= 1 - 0.025 * (0.5 + 0.5*math.cos(TAU*i/13))**6
         for j in range(96):
             a = TAU*j/96
             vertices.append((radius*math.cos(a), y, 0.23 + radius*0.73*math.sin(a)-0.13*t))
@@ -172,7 +171,7 @@ def legs(side):
 
 
 def wing_point(side, u, v):
-    width = 0.5*(math.sin(math.pi*u)**0.7)
+    width = 0.36*(math.sin(math.pi*u)**0.7)
     return (side*(0.29+1.05*u+width*v), 0.05+2.0*u-0.32*width*v, 0.66+0.1*u+0.025*v)
 
 
@@ -197,14 +196,14 @@ def wings(side):
         u, v = random.uniform(0.04, 0.96), random.uniform(-0.98, 0.98)
         p = Vector(wing_point(side, u, v))
         micro.append([(*p, 0.8), (*(p+Vector((0, 0.018, 0.007))), 0.01)])
-    curves('Wing microtrichia', micro, 0.0015, VEIN)
+    curves('Wing microtrichia', micro, 0.00055, HAIR)
     curves('Haltere stalk', [[(side*0.38, 0.39, 0.21), (side*0.7, 0.58, 0.34)]], 0.022, AMBER)
     sphere('Haltere knob', (side*0.7, 0.58, 0.34), (0.075, 0.09, 0.07), AMBER)
 
 
 def head():
     sphere('Head capsule', (0, -0.81, 0.36), (0.4, 0.34, 0.35), SHELL)
-    sphere('Facial plate', (0, -1.095, 0.24), (0.18, 0.065, 0.18), AMBER)
+    sphere('Facial plate', (0, -1.095, 0.24), (0.18, 0.065, 0.13), AMBER)
     sphere('Proboscis', (0, -1.11, 0.09), (0.1, 0.14, 0.1), DARK)
     for side in (-1, 1):
         compound_eye(side)
@@ -222,6 +221,27 @@ def head():
     for x, y in ((-0.06, -0.76), (0.06, -0.76), (0, -0.86)):
         sphere('Ocellus', (x, y, 0.69), (0.035, 0.04, 0.027), FACET)
     bristles((0, -0.81, 0.36), (0.4, 0.34, 0.35), 200, 0.07)
+
+
+def neural_traces():
+    mat = material('Conceptual cyan neural traces', (0.03, 0.7, 0.8), 0.2, 0.3)
+    shader = mat.node_tree.nodes.get('Principled BSDF')
+    shader.inputs['Emission Color'].default_value = (0.015, 0.8, 1, 1)
+    shader.inputs['Emission Strength'].default_value = 2.5
+    paths = []
+    def surface(x, y):
+        z = 0.34 + 0.425 * math.sqrt(max(0.01, 1-(x/0.435)**2-((y+0.02)/0.565)**2))
+        return Vector((x, y, z))
+    for _ in range(18):
+        x, y = random.uniform(-0.22, 0.22), random.uniform(-0.32, 0.29)
+        points = [surface(x, y)]
+        for _ in range(7):
+            x = max(-0.3, min(0.3, x + random.uniform(-0.05, 0.05)))
+            y = max(-0.4, min(0.4, y + random.uniform(-0.055, 0.065)))
+            points.append(surface(x, y))
+        paths.append(points)
+        sphere('Conceptual neural node', points[3], (0.012,)*3, mat)
+    curves('Conceptual neural filaments', paths, 0.0025, mat)
 
 
 def area(name, location, color, energy, size):
@@ -252,7 +272,7 @@ def setup_scene():
     camera = bpy.context.object
     camera.rotation_euler = (Vector((0, 0.3, 0.1))-camera.location).to_track_quat('-Z', 'Y').to_euler()
     camera.data.type = 'ORTHO'
-    camera.data.ortho_scale = 5.0
+    camera.data.ortho_scale = 6.1
     scene.camera = camera
     area('Softbox', (0, -3, 5), (0.8, 0.93, 1), 480, 4)
     area('Cyan rim', (2, 3, 2.5), (0.19, 0.8, 1), 650, 3)
@@ -268,8 +288,9 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     sphere('Thoracic scutum', (0, -0.02, 0.34), (0.43, 0.56, 0.42), SHELL)
     sphere('Scutellum', (0, 0.44, 0.41), (0.26, 0.24, 0.21), SHELL)
-    bristles((0, -0.02, 0.34), (0.43, 0.56, 0.42), 850, 0.075)
-    bristles((0, -0.02, 0.34), (0.43, 0.56, 0.42), 65, 0.18)
+    bristles((0, -0.02, 0.34), (0.43, 0.56, 0.42), 850, 0.045)
+    bristles((0, -0.02, 0.34), (0.43, 0.56, 0.42), 65, 0.13)
+    neural_traces()
     abdomen()
     head()
     for side in (-1, 1):
@@ -287,7 +308,7 @@ if __name__ == '__main__':
     bpy.ops.object.delete(use_global=False)
     ROOT = bpy.data.objects.new('Fly turntable', None)
     bpy.context.collection.objects.link(ROOT)
-    SHELL = textured_shell('Bronze thoracic cuticle', (0.14, 0.105, 0.055))
+    SHELL = textured_shell('Bronze thoracic cuticle', (0.12, 0.065, 0.027))
     AMBER = textured_shell('Amber cuticle', (0.32, 0.17, 0.052))
     DARK = textured_shell('Dark abdominal bands', (0.035, 0.023, 0.014))
     HAIR = material('Fine golden bristles', (0.16, 0.12, 0.07), 0.1, 0.5)
@@ -299,7 +320,7 @@ if __name__ == '__main__':
     shader = nodes.get('Principled BSDF')
     transparent = nodes.new('ShaderNodeBsdfTransparent')
     mix = nodes.new('ShaderNodeMixShader')
-    mix.inputs[0].default_value = 0.16
+    mix.inputs[0].default_value = 0.065
     links.new(transparent.outputs[0], mix.inputs[1])
     links.new(shader.outputs[0], mix.inputs[2])
     links.new(mix.outputs[0], nodes.get('Material Output').inputs['Surface'])

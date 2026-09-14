@@ -12,7 +12,7 @@ Gymnasium environment. Observations land on the fly's compound eye, activity flo
 real wiring, and descending / motor neurons are read out as actions.
 
 <p align="center">
-  <img src="docs/assets/fly-3d.gif" alt="A stylised three-dimensional fruit fly rotating through a full turn, with red compound eyes, six legs and two wings" width="800" />
+  <a href="docs/assets/fly-3d-preview.png"><img src="docs/assets/fly-3d.gif" alt="A detailed 3D fruit fly rotating through a full turn, with faceted red compound eyes, fine body bristles, six articulated legs and translucent veined wings" width="1000" /></a>
   <br />
   <em>A conceptual 3D fly study, not a biological reconstruction or a recording of neural activity.</em>
 </p>
@@ -279,5 +279,12 @@ for the citation). Please cite the MaleCNS paper when you publish results built 
 
 README artwork: the [hero](docs/assets/hero.png) and [background](docs/assets/background.png)
 are AI-generated illustrations, not MaleCNS visualisations. The [3D animation](docs/assets/fly-3d.gif)
-uses procedural illustrative geometry; regenerate it with
-`uv run --with pillow python docs/assets/render_fly.py`.
+is a Blender-rendered illustrative model with compound-eye facets, cuticular bristles,
+segmented legs and translucent veined wings. Its glowing traces are artistic, not neural data.
+View the [full-resolution still](docs/assets/fly-3d-preview.png), or regenerate the animation
+with Blender and FFmpeg installed:
+
+```bash
+blender --background --python docs/assets/render_fly_blender.py -- --frames 96
+uv run python docs/assets/render_fly.py
+```
