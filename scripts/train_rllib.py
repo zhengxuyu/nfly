@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 import ray
 
@@ -58,7 +59,7 @@ def main() -> None:
                           "entropy": _num(learner.get("entropy")), "kl": _num(learner.get("mean_kl_loss")),
                           "timers": timers}), flush=True)
         if i % args.checkpoint_every == 0 or i == args.iters:
-            print("checkpoint:", algo.save_to_path(args.out), flush=True)
+            print("checkpoint:", algo.save_to_path(os.path.abspath(args.out)), flush=True)   # RLlib needs an absolute path
 
 
 if __name__ == "__main__":

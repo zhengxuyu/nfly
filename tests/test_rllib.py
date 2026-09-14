@@ -37,14 +37,17 @@ def test_module_forward_passes(data_dir, obs_space, act_space, dist):
     m.forward_inference(batch); m.forward_exploration(batch)
 
 
-def test_ppo_trains_end_to_end(data_dir):
+def test_ppo_trains_end_to_end(data_dir, tmp_path):
     import ray
     ray.init(num_cpus=2, include_dashboard=False, log_to_driver=False, ignore_reinit_error=True)
     try:
         cfg = build_config("PPO", suite="classic", game="cartpole", data_dir=data_dir, subset="all", min_syn=1,
                            num_env_runners=0, train_batch_size=128, minibatch_size=32, num_epochs=1, max_seq_len=8)
         assert cfg.env == env_id("classic", "cartpole")
-        result = cfg.build_algo().train()
+        algo = cfg.build_algo()
+        result = algo.train()
         assert result["num_env_steps_sampled_lifetime"] >= 128
+        out = algo.save_to_path(str(tmp_path / "ckpt"))       # absolute path, as scripts/train_rllib.py passes it
+        assert (tmp_path / "ckpt").exists() and out
     finally:
         ray.shutdown()
