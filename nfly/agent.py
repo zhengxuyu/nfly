@@ -21,6 +21,17 @@ from .interface.decoders import ActionDecoder
 from .interface.encoders import ObservationEncoder
 
 
+def _projection_targets(observed: torch.Tensor, k: int) -> torch.Tensor:
+    """What the readout projection should reconstruct: vector observations as they are, images
+    (or any observation with more than k values) through their top-k principal components."""
+    flat = observed.reshape(observed.shape[0], -1)
+    if flat.shape[1] <= k:
+        return flat
+    centred = flat - flat.mean(0)
+    _, _, v = torch.pca_lowrank(centred, q=k, center=False)
+    return centred @ v
+
+
 class FlyAgent(nn.Module):
     """Defaults (rnn_steps 4, alpha 0.7, input_gain 5) come from a probe on CartPole: with one
     network step per env step and alpha 0.3, the 3-4 synaptic hops from sensory to descending
@@ -53,32 +64,43 @@ class FlyAgent(nn.Module):
 
     @torch.no_grad()
     def calibrate(self, obs_space: gym.Space, n_probe: int = 16, steps: int = 64, rest_steps: int = 64,
-                  seed: int = 0) -> None:
-        """Set the resting state and the readout normalisation.
+                  seed: int = 0) -> float | None:
+        """Set the resting state, the readout normalisation and the readout projection.
 
         The resting state is the activity after `rest_steps` steps with no input; episodes start
-        there. The normalisation comes from a probe: `n_probe` parallel runs of `steps` env steps
-        from the resting state, a fresh random observation every step, keeping the readout state
-        of every step. Unbounded Box values are clipped to +-3."""
+        there. The probe then runs `n_probe` parallel sequences of `steps` env steps from the
+        resting state, each a smooth random walk through observation space (unbounded Box
+        values clipped to +-3), keeping the readout state and the observation of every step.
+        The normalisation comes from those states; the bottleneck projection is regressed from
+        them onto the observations (vectors as they are, images through a PCA to the bottleneck
+        width). Returns the projection fit's R^2, or None when the decoder has no bottleneck."""
         rng = np.random.default_rng(seed)
         obs_space.seed(int(rng.integers(2**31)))
         unbounded = isinstance(obs_space, gym.spaces.Box) and not (np.all(np.isfinite(obs_space.low)) and np.all(np.isfinite(obs_space.high)))
+        dev = self.input_gain.device
 
         def sample():
             probe = np.stack([obs_space.sample() for _ in range(n_probe)])
-            return torch.as_tensor(np.clip(probe, -3, 3) if unbounded else probe, device=self.input_gain.device)
+            return torch.as_tensor(np.clip(probe, -3, 3) if unbounded else probe, device=dev).float()
 
         weights = self.brain.weights()
-        h = torch.zeros(1, self.brain.n, device=self.input_gain.device)
+        h = torch.zeros(1, self.brain.n, device=dev)
         for _ in range(rest_steps):                              # settle with no input: the resting state
             h = self.brain.step(h, None, weights)
         self.h_rest.copy_(h[0])
+
         h = self.initial_state(n_probe)
-        states = []
+        obs = sample()
+        states, observed = [], []
         for _ in range(steps):
-            _, h = self.step(sample(), h, weights)
+            obs = 0.8 * obs + 0.2 * sample()                     # smooth walk, as real observations are
+            _, h = self.step(obs, h, weights)
             states.append(h)
-        self.decoder.calibrate(torch.cat(states))
+            observed.append(obs)
+        states, observed = torch.cat(states), torch.cat(observed)
+        r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features))
+        self.value = nn.Linear(self.decoder.n_features, 1).to(dev)
+        return r2
 
     @property
     def n_neurons(self) -> int:

@@ -78,9 +78,37 @@ class ActionDecoder(nn.Module):
     def features(self, h: torch.Tensor) -> torch.Tensor:
         return self.proj(self.norm(h[:, self.idx]))
 
-    def calibrate(self, h: torch.Tensor) -> None:
-        """Set the readout normalisation from a probe of states h (M, N)."""
+    def calibrate(self, h: torch.Tensor, targets: torch.Tensor | None = None, ridge: float = 0.1) -> float | None:
+        """Set the readout normalisation from a probe of states h (M, N) and, when `targets`
+        (M, T) are given, point the bottleneck at them: ridge-regress the normalised readout
+        onto the targets and install the solution (scaled to unit output variance) as the
+        projection. With observations as targets the heads then see a reconstruction of what
+        the agent observed instead of a random slice of readout activity, half of whose
+        variance is the network's own drift. Returns the fit's R^2 on the probe."""
         self.norm.calibrate(h[:, self.idx])
+        if targets is None or not isinstance(self.proj, nn.Linear):
+            return None
+        with torch.no_grad():
+            x = self.norm(h[:, self.idx])
+            k = min(self.proj.out_features, targets.shape[1])
+            y = (targets[:, :k] - targets[:, :k].mean(0)) / (targets[:, :k].std(0) + 1e-6)
+            xc = x - x.mean(0)
+            gram = xc.T @ xc
+            lam = ridge * gram.diagonal().mean()
+            w = torch.linalg.solve(gram + lam * torch.eye(gram.shape[0], device=x.device), xc.T @ y)     # (R, k)
+            pred = xc @ w
+            r2 = float(1 - ((pred - y) ** 2).sum() / ((y - y.mean(0)) ** 2).sum())
+            w = w / (pred.std(0) + 1e-6)
+            proj = nn.Linear(x.shape[1], k, bias=True).to(x.device)
+            proj.weight.copy_(w.T)
+            proj.bias.copy_(-(x.mean(0) @ w))
+            self.proj = proj
+            self._rebuild_heads(k)
+        return r2
+
+    def _rebuild_heads(self, n_features: int) -> None:
+        """Heads are created for the initial feature width; recreate them when it changes."""
+        raise NotImplementedError
 
     def dist_inputs(self, feats: torch.Tensor) -> torch.Tensor:
         """Raw distribution parameters (logits, or [mean, log_std]) - what RL libraries want."""
@@ -110,6 +138,11 @@ class DiscreteDecoder(ActionDecoder):
         self.head = nn.Linear(self.n_features, n_actions)
         nn.init.zeros_(self.head.weight); nn.init.zeros_(self.head.bias)
 
+    def _rebuild_heads(self, n_features):
+        head = nn.Linear(n_features, self.head.out_features).to(self.head.weight.device)
+        nn.init.zeros_(head.weight); nn.init.zeros_(head.bias)
+        self.head = head
+
     def dist_inputs(self, feats):
         return self.head(feats)
 
@@ -128,6 +161,9 @@ class BoxDecoder(ActionDecoder):
         self.log_std = nn.Parameter(torch.full((d,), -0.5))
         self.register_buffer("lo", torch.as_tensor(space.low).flatten().float())
         self.register_buffer("hi", torch.as_tensor(space.high).flatten().float())
+
+    def _rebuild_heads(self, n_features):
+        self.mean = nn.Linear(n_features, self.mean.out_features).to(self.mean.weight.device)
 
     def dist_inputs(self, feats):
         mu = torch.tanh(self.mean(feats))

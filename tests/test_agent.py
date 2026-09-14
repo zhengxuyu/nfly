@@ -208,3 +208,24 @@ def test_episodes_start_from_the_resting_state():
     with torch.no_grad():                                                # and (nearly) a fixed point with no input
         h1 = a.brain.step(h0, None, a.brain.weights())
     assert torch.allclose(h1, h0, atol=1e-3)
+
+
+def test_calibrated_projection_reconstructs_vector_observations():
+    from nfly import load_malecns
+    from nfly.connectome import write_synthetic
+    import tempfile, pathlib
+    c = load_malecns(write_synthetic(pathlib.Path(tempfile.mkdtemp())), cache=False)
+    space = gym.spaces.Box(-1, 1, (4,), np.float32)
+    a = FlyAgent.build(c, space, gym.spaces.Discrete(2))
+    assert a.decoder.n_features == 4 and a.value.in_features == 4       # k shrinks to the observation width
+    r2 = a.calibrate(space)
+    assert r2 is not None and r2 > 0.5
+    # heads still produce the right shapes after the rebuild
+    dist, v, _ = a(torch.rand(3, 4) * 2 - 1, a.initial_state(3))
+    assert dist.sample().shape == (3,) and v.shape == (3,)
+
+
+def test_calibrated_projection_uses_pca_for_images():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
+    assert a.decoder.n_features == 8 and a.decoder.proj.in_features == a.decoder.n_readout
