@@ -148,9 +148,9 @@ smooth random walk through observation space from the resting state. Validation 
 network: probe R^2 0.98; in real play R^2 [0.91, 0.95, 0.92, 0.93]; behaviour cloning 88% with
 head norm 1.3.
 
-**Run v5** (regression readout; full model, frozen brain, heads only): at update 70 the full
-model was at 24 (entropy 0.48), the frozen brain at 15 (entropy 0.24, collapsing); heads-only
-in progress.
+**Run v5** (regression readout; full model, frozen brain, heads only): all three ended at
+update 200 (100k steps) at random level: 21, 19 and 19. The representation was fine (section
+5), so the remaining suspect was the head itself.
 
 ## 8. Is a linear policy the limiting factor?
 
@@ -163,10 +163,18 @@ the temporal profile is not the blocker. A purely linear policy and value functi
 observation: 72 at update 60, then collapse to 19 by update 120.
 
 **Conclusion.** The fly's linear head on a 4-d reconstruction of the observation inherits the
-weakness of a linear policy under this trainer. The likely culprit is the linear value function
-(CartPole's value is nonlinear in the state), which corrupts the advantages. A nonlinear critic
-does not change what the fly computes when acting, so it is admissible. Test in progress:
-linear policy + MLP critic on the plain observation.
+weakness of a linear policy under this trainer. The culprit is the linear value function
+(CartPole's value is nonlinear in the state), which corrupts the advantages.
+
+**Experiment.** Linear policy + 64-unit tanh MLP critic on the plain observation, two seeds.
+
+**Result.** 127 and 164 at update 120, the same range as the full MLP policy (140-150).
+
+**Conclusion.** A nonlinear critic is enough. It is training-only and does not change what the
+fly computes when acting, so it is admissible. **Change:** the value head is a small tanh MLP
+on the readout features; the policy stays linear.
+
+**Run v6** (regression readout + MLP critic; full model and frozen brain): in progress.
 
 ## What is settled and what is open
 
@@ -179,9 +187,9 @@ Settled:
 - Collapse comes from high-dimensional or high-rate heads, not from the brain parameters.
 
 Open:
-- Whether a nonlinear critic (policy still linear on the readout) is enough for RL to find the
-  head that behaviour cloning finds.
+- Whether the MLP critic lets RL find the head that behaviour cloning finds on the fly's
+  features as it does on the plain observation (run v6).
 - Whether training the brain parameters helps or hurts once the interface is right (v5 full vs
-  frozen were indistinguishable so far).
+  frozen were indistinguishable).
 - Everything above is CartPole; Pong will re-open the question of what the optic lobe
   contributes beyond transmission.
