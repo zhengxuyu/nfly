@@ -11,6 +11,7 @@ built from a connectome and a pair of Gymnasium spaces, so any env works:
 from __future__ import annotations
 
 import gymnasium as gym
+import numpy as np
 import torch
 from torch import nn
 
@@ -37,7 +38,25 @@ class FlyAgent(nn.Module):
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
         enc = encoder or ObservationEncoder.for_space(conn, obs_space, **(encoder_kw or {}))
         dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx)
-        return cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain)
+        agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain)
+        agent.calibrate(obs_space)
+        return agent
+
+    @torch.no_grad()
+    def calibrate(self, obs_space: gym.Space, n_probe: int = 64, steps: int = 8, seed: int = 0) -> None:
+        """Set the readout normalisation from the activity reached after `steps` env steps on a
+        probe of `n_probe` random observations (unbounded Box values are clipped to +-3)."""
+        rng = np.random.default_rng(seed)
+        obs_space.seed(int(rng.integers(2**31)))
+        probe = np.stack([obs_space.sample() for _ in range(n_probe)])
+        if isinstance(obs_space, gym.spaces.Box) and not (np.all(np.isfinite(obs_space.low)) and np.all(np.isfinite(obs_space.high))):
+            probe = np.clip(probe, -3, 3)
+        obs = torch.as_tensor(probe, device=self.input_gain.device)
+        h = self.initial_state(n_probe)
+        weights = self.brain.weights()
+        for _ in range(steps):
+            _, h = self.step(obs, h, weights)
+        self.decoder.calibrate(h)
 
     @property
     def n_neurons(self) -> int:

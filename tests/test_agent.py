@@ -128,15 +128,22 @@ def test_a2c_smoke():
     venv.close()
 
 
-def test_running_norm_removes_constant_pattern():
-    from nfly.interface import RunningNorm
+def test_readout_norm_calibration_exposes_small_signal():
+    from nfly.interface import ReadoutNorm
     torch.manual_seed(0)
     pattern = torch.randn(50) * 5                      # large fixed per-neuron offset
-    signal = torch.randn(4000, 50) * 1e-3              # tiny informative part
-    norm = RunningNorm(50, momentum=0.05).train()
-    for chunk in (pattern + signal).split(100):
-        out = norm(chunk)
-    norm.eval()
-    out = norm(pattern + signal[:100])
-    assert out.abs().mean() < 3 and out.std(0).mean() > 0.5     # centred and rescaled to O(1)
-    assert torch.allclose(norm(pattern + signal[:1]), norm(pattern + signal[:1]))   # eval is deterministic
+    signal = torch.randn(200, 50) * 1e-3               # tiny informative part
+    norm = ReadoutNorm(50)
+    norm.calibrate(pattern + signal)
+    out = norm(pattern + signal)
+    assert out.abs().mean() < 3 and 0.5 < out.std(0).mean() < 2      # centred and rescaled to O(1)
+    assert torch.equal(norm(pattern + signal[:1]), norm(pattern + signal[:1]))
+    assert all(p.requires_grad for p in norm.parameters())
+
+
+def test_agent_build_calibrates_readout():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
+    assert not torch.all(a.decoder.norm.mean == 0)      # calibrated, not the default zeros
+    feats, _ = a.step(torch.rand(6, 84, 84), a.initial_state(6))
+    assert feats.abs().max() <= 10

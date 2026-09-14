@@ -19,35 +19,31 @@ def default_readout_nodes(conn: Connectome) -> torch.Tensor:
     return idx if len(idx) else conn.output_nodes()
 
 
-class RunningNorm(nn.Module):
-    """Per-neuron standardisation with running statistics, applied identically in train and eval.
+class ReadoutNorm(nn.Module):
+    """Per-neuron standardisation with learnable mean and scale, calibrated once at build time.
 
     Readout neurons sit on a large, nearly constant resting pattern; the observation-dependent
-    part of their activity is orders of magnitude smaller. Normalising each neuron by its own
-    running mean and variance removes that pattern, so the heads (and their gradients) see the
-    part that carries information. Statistics are a cumulative average for the first
-    1/momentum updates (fast, unbiased warm-up), then an exponential moving average; they are
-    updated in train mode only. Outputs are clipped to +-clip so an unseen extreme cannot blow
-    up the heads."""
+    part of their activity is orders of magnitude smaller. Subtracting each neuron's typical
+    activity and dividing by its typical spread removes the pattern, so the heads (and their
+    gradients) see the part that carries information. `calibrate` sets both from a probe of
+    activities; afterwards they train like any parameter, which keeps every forward pass
+    deterministic (no running statistics to drift between rollout, replay and target copies)."""
 
-    def __init__(self, n: int, momentum: float = 0.01, eps: float = 1e-8, clip: float = 10.0):
+    def __init__(self, n: int, min_std: float = 1e-4, clip: float = 10.0):
         super().__init__()
-        self.momentum, self.eps, self.clip = momentum, eps, clip
-        self.register_buffer("mean", torch.zeros(n))
-        self.register_buffer("var", torch.ones(n))
-        self.register_buffer("count", torch.zeros((), dtype=torch.long))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.training:
-            self._update(x.detach().reshape(-1, x.shape[-1]))
-        return ((x - self.mean) / torch.sqrt(self.var + self.eps)).clamp(-self.clip, self.clip)
+        self.min_std, self.clip = min_std, clip
+        self.mean = nn.Parameter(torch.zeros(n))
+        self.log_scale = nn.Parameter(torch.zeros(n))
 
     @torch.no_grad()
-    def _update(self, flat: torch.Tensor) -> None:
-        self.count += 1
-        m = max(1.0 / float(self.count), self.momentum)
-        self.mean.lerp_(flat.mean(0), m)
-        self.var.lerp_(flat.var(0, unbiased=False), m)
+    def calibrate(self, activity: torch.Tensor) -> None:
+        """activity: (M, n) readout activities from a probe of observations."""
+        flat = activity.reshape(-1, activity.shape[-1])
+        self.mean.copy_(flat.mean(0))
+        self.log_scale.copy_(torch.log(flat.std(0).clamp_min(self.min_std)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return ((x - self.mean) * torch.exp(-self.log_scale)).clamp(-self.clip, self.clip)
 
 
 class ActionDecoder(nn.Module):
@@ -56,7 +52,7 @@ class ActionDecoder(nn.Module):
     def __init__(self, readout_idx: torch.Tensor):
         super().__init__()
         self.register_buffer("idx", torch.as_tensor(readout_idx, dtype=torch.long))
-        self.norm = RunningNorm(len(readout_idx))
+        self.norm = ReadoutNorm(len(readout_idx))
 
     @property
     def n_readout(self) -> int:
@@ -64,6 +60,10 @@ class ActionDecoder(nn.Module):
 
     def features(self, h: torch.Tensor) -> torch.Tensor:
         return self.norm(h[:, self.idx])
+
+    def calibrate(self, h: torch.Tensor) -> None:
+        """Set the readout normalisation from a probe of states h (M, N)."""
+        self.norm.calibrate(h[:, self.idx])
 
     def dist_inputs(self, feats: torch.Tensor) -> torch.Tensor:
         """Raw distribution parameters (logits, or [mean, log_std]) - what RL libraries want."""
