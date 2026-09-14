@@ -51,3 +51,35 @@ def test_ppo_trains_end_to_end(data_dir, tmp_path):
         assert (tmp_path / "ckpt").exists() and out
     finally:
         ray.shutdown()
+
+
+def test_target_network_api(data_dir):
+    from ray.rllib.core.rl_module.apis.target_network_api import TARGET_NETWORK_ACTION_DIST_INPUTS
+    obs_space, act_space = gym.spaces.Box(-1, 1, (4,), np.float32), gym.spaces.Discrete(2)
+    m = FlyRLModule(observation_space=obs_space, action_space=act_space,
+                    model_config={"data_dir": data_dir, "min_syn": 1, "subset": "all"})
+    m.make_target_networks()
+    (main, target), = m.get_target_network_pairs()
+    assert main is m.agent and target is m.target_agent
+    assert all(not p.requires_grad for p in target.parameters())
+    B, T = 2, 3
+    state = {k: torch.as_tensor(v).unsqueeze(0).repeat(B, 1) for k, v in m.get_initial_state().items()}
+    batch = {Columns.OBS: torch.rand(B, T, 4), Columns.STATE_IN: state}
+    out = m.forward_target(batch)[TARGET_NETWORK_ACTION_DIST_INPUTS]
+    assert out.shape == (B, T, 2) and torch.allclose(out, m.forward_train(batch)[Columns.ACTION_DIST_INPUTS])
+    assert "target_agent" in m.get_non_inference_attributes()
+
+
+def test_appo_trains_end_to_end(data_dir, tmp_path):
+    import ray
+    ray.init(num_cpus=2, include_dashboard=False, log_to_driver=False, ignore_reinit_error=True)
+    try:
+        cfg = build_config("APPO", suite="classic", game="cartpole", data_dir=data_dir, subset="all", min_syn=1,
+                           rnn_steps=1, num_env_runners=1, train_batch_size=128, minibatch_size=32, max_seq_len=8)
+        algo = cfg.build_algo()
+        for _ in range(3):
+            result = algo.train()
+        assert result["num_env_steps_sampled_lifetime"] >= 128
+        assert "default_policy" in result.get("learners", {})
+    finally:
+        ray.shutdown()

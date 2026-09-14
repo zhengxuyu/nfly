@@ -1,3 +1,5 @@
+![nfly - Fly wiring. Trainable intelligence.](docs/assets/hero.png)
+
 # nfly
 
 **A standardised fly-brain neural network built from the Janelia MaleCNS v1.0 connectome, with
@@ -8,6 +10,12 @@ nfly turns the male *Drosophila* central nervous system (166,700 annotated neuro
 synaptic connections) into a sparse, sign-constrained recurrent network you can drop into any
 Gymnasium environment. Observations land on the fly's compound eye, activity flows through the
 real wiring, and descending / motor neurons are read out as actions.
+
+<p align="center">
+  <img src="docs/assets/fly-3d.gif" alt="A stylised three-dimensional fruit fly rotating through a full turn, with red compound eyes, six legs and two wings" width="800" />
+  <br />
+  <em>A conceptual 3D fly study, not a biological reconstruction or a recording of neural activity.</em>
+</p>
 
 ```text
 observation        (gym observation_space: frames, vectors, ...)
@@ -26,6 +34,8 @@ action             (gym action_space)
 ```
 
 ## About the data: Janelia MaleCNS v1.0
+
+![Conceptual neural filaments on a midnight-blue background](docs/assets/background.png)
 
 [MaleCNS](https://male-cns.janelia.org/) is the first complete connectome of an adult male
 *Drosophila melanogaster* central nervous system: brain and ventral nerve cord imaged with
@@ -266,3 +276,8 @@ source), the one-directional layer rule and the uv-only environment rule.
 
 Code: [MIT](LICENSE). Data: MaleCNS v1.0, CC-BY 4.0 (see [About the data](#about-the-data-janelia-malecns-v10)
 for the citation). Please cite the MaleCNS paper when you publish results built on this model.
+
+README artwork: the [hero](docs/assets/hero.png) and [background](docs/assets/background.png)
+are AI-generated illustrations, not MaleCNS visualisations. The [3D animation](docs/assets/fly-3d.gif)
+uses procedural illustrative geometry; regenerate it with
+`uv run --with pillow python docs/assets/render_fly.py`.
