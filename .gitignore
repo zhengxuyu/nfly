@@ -1,0 +1,9 @@
+data/*.feather
+data/cache/
+data/synthetic/
+runs/
+videos/
+__pycache__/
+*.pt
+.pytest_cache/
+*.egg-info/
