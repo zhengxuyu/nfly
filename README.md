@@ -1,6 +1,8 @@
 ![nfly - Biological wiring. Mechanical future.](docs/assets/hero-mechanical.png)
 
-# nfly
+# cyberfly
+
+Python package `nfly`.
 
 **A standardised fly-brain neural network built from the Janelia MaleCNS v1.0 connectome, with
 standardised reinforcement-learning infrastructure and a live viewer.**
@@ -77,7 +79,7 @@ The project is managed with [uv](https://docs.astral.sh/uv/): one `pyproject.tom
 `uv.lock`, one `.venv` per checkout.
 
 ```bash
-git clone https://github.com/zhengxuyu/nfly.git && cd nfly
+git clone https://github.com/zhengxuyu/cyberfly.git && cd cyberfly
 curl -LsSf https://astral.sh/uv/install.sh | sh        # uv, once per machine
 uv sync --extra dev                                     # .venv with torch, gymnasium, ale-py, ray, pytest
 uv run pytest -q                                        # 25 tests on a synthetic connectome, no download needed
