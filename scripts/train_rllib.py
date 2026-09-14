@@ -38,7 +38,8 @@ def main() -> None:
     p.add_argument("--lr", type=float, default=2.5e-4)
     p.add_argument("--entropy-coeff", type=float, default=0.01)
     p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
-                   help="extra AlgorithmConfig.training() setting, e.g. --set clip_param=0.1 --set lambda_=0.95 (values parsed as JSON)")
+                   help="extra AlgorithmConfig.training() setting, e.g. --set clip_param=0.1 --set lambda_=0.95 "
+                        "--set lr=[[0,0.00025],[10000000,0]] (values parsed as JSON)")
     p.add_argument("--iters", type=int, default=100)
     p.add_argument("--checkpoint-every", type=int, default=10)
     p.add_argument("--out", default="runs/rllib")
@@ -46,11 +47,12 @@ def main() -> None:
 
     ray.init(ignore_reinit_error=True)
     extra = {k: json.loads(v) for k, v in (kv.split("=", 1) for kv in args.set)}
+    lr = extra.pop("lr", args.lr)          # --set lr=[[0,2.5e-4],[10000000,0]] gives a schedule
     config = build_config(args.algo, suite=args.suite, game=args.game, data_dir=args.data, subset=args.subset,
                           min_syn=args.min_syn, rnn_steps=args.rnn_steps, max_seq_len=args.max_seq_len,
                           num_env_runners=args.env_runners, num_envs_per_env_runner=args.envs_per_runner,
                           num_gpus=args.gpus, train_batch_size=args.train_batch, minibatch_size=args.minibatch,
-                          num_epochs=args.epochs, lr=args.lr, entropy_coeff=args.entropy_coeff, **extra)
+                          num_epochs=args.epochs, lr=lr, entropy_coeff=args.entropy_coeff, **extra)
     algo = config.build_algo()
     for i in range(1, args.iters + 1):
         r = algo.train()
