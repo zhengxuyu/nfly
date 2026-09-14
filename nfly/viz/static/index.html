@@ -11,9 +11,10 @@
   header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
   header h1 { font-size: 16px; margin: 0; }
   header .meta { color: var(--dim); }
-  main { display: grid; grid-template-columns: minmax(320px, 2fr) minmax(280px, 1fr); gap: 16px; padding: 16px; }
+  main { display: grid; grid-template-columns: minmax(480px, 3fr) minmax(300px, 1fr); gap: 16px; padding: 16px; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  canvas#frame { display: block; margin: 0 auto; max-width: 100%; max-height: 62vh; width: auto; image-rendering: pixelated; background: #000; border-radius: 4px; }
+  .stage { display: flex; justify-content: center; align-items: center; height: calc(100vh - 230px); min-height: 360px; }
+  canvas#frame { max-width: 100%; max-height: 100%; width: auto; height: 100%; image-rendering: pixelated; background: #000; border-radius: 4px; }
   .controls { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
   button { background: #222733; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
   button:hover { border-color: var(--acc); }
@@ -46,7 +47,7 @@
 </header>
 <main>
   <section class="panel">
-    <canvas id="frame" width="160" height="210"></canvas>
+    <div class="stage"><canvas id="frame" width="160" height="210"></canvas></div>
     <div class="controls">
       <button id="btnPause">Pause</button>
       <button id="btnStep">Step</button>
