@@ -26,6 +26,7 @@ class PPOConfig:
     minibatch_envs: int = 8    # envs per minibatch (each minibatch replays the whole segment)
     lr: float = 1e-3
     brain_lr_scale: float = 0.1   # multiplier on lr for parameters under `agent.brain`
+    head_fan_in: int | None = 64  # head lr is scaled by head_fan_in / n_readout; None = no scaling
     gamma: float = 0.98
     lam: float = 0.8
     clip: float = 0.2
@@ -39,17 +40,18 @@ class PPOConfig:
     out: str | None = None
 
 
-def param_groups(agent, lr: float, brain_lr_scale: float) -> list[dict]:
+def param_groups(agent, lr: float, brain_lr_scale: float, head_fan_in: int | None) -> list[dict]:
     """Ask the agent for its optimizer groups if it has an opinion (FlyAgent does), else one group."""
     if hasattr(agent, "param_groups"):
-        return agent.param_groups(lr, brain_scale=brain_lr_scale)
+        fan_in = head_fan_in if head_fan_in is not None else agent.decoder.n_readout
+        return agent.param_groups(lr, brain_scale=brain_lr_scale, reference_fan_in=fan_in)
     return [{"params": [q for q in agent.parameters() if q.requires_grad], "lr": lr}]
 
 
 def train_ppo(agent, venv, cfg: PPOConfig, device="cpu", seed: int = 0, log=None) -> list[float]:
     dev = torch.device(device)
     n_envs = venv.num_envs
-    opt = torch.optim.Adam(param_groups(agent, cfg.lr, cfg.brain_lr_scale), eps=1e-5)
+    opt = torch.optim.Adam(param_groups(agent, cfg.lr, cfg.brain_lr_scale, cfg.head_fan_in), eps=1e-5)
     obs, _ = venv.reset(seed=seed)
     h = agent.initial_state(n_envs)
     track = Tracker(log) if log else Tracker()
