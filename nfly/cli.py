@@ -19,7 +19,16 @@ def connectome_from_args(args: argparse.Namespace) -> Connectome:
     return select_subset(load_malecns(args.data, min_syn=args.min_syn), args.subset)
 
 
+def agent_kwargs(args: argparse.Namespace) -> dict:
+    """FlyAgent.build keyword arguments derived from the agent argument group."""
+    kw = {"rnn_steps": args.rnn_steps}
+    if getattr(args, "freeze_brain", False):
+        kw.update(learn_gain=False, learn_alpha=False, learn_bias=False)
+    return kw
+
+
 def add_agent_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--rnn-steps", type=int, default=4, help="network steps per env step")
+    p.add_argument("--freeze-brain", action="store_true", help="train only encoder, readout and heads; keep the connectome parameters fixed")
     p.add_argument("--device", default="cpu")
     p.add_argument("--seed", type=int, default=0)

@@ -11,7 +11,7 @@ import argparse
 import torch
 
 from nfly import FlyAgent
-from nfly.cli import add_agent_args, add_connectome_args, connectome_from_args
+from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, connectome_from_args
 from nfly.rl import A2CConfig, PPOConfig, train_a2c, train_ppo
 from nfly.suite import get_suite
 
@@ -36,7 +36,7 @@ def main() -> None:
 
     conn = connectome_from_args(args)
     venv = get_suite(args.suite).make_vector(args.game, args.envs, seed=args.seed)
-    agent = FlyAgent.build(conn, venv.single_observation_space, venv.single_action_space, rnn_steps=args.rnn_steps).to(args.device)
+    agent = FlyAgent.build(conn, venv.single_observation_space, venv.single_action_space, **agent_kwargs(args)).to(args.device)
     print(agent.summary())
     config_cls, train = TRAINERS[args.algo]
     overrides = {k: v for k, v in dict(rollout=args.rollout, lr=args.lr, entropy=args.entropy).items() if v is not None}

@@ -13,7 +13,7 @@ import gymnasium as gym
 import torch
 
 from nfly import FlyAgent
-from nfly.cli import add_agent_args, add_connectome_args, connectome_from_args
+from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, connectome_from_args
 from nfly.suite import get_suite, play_episode
 
 
@@ -34,7 +34,7 @@ def main() -> None:
     env = get_suite(args.suite).make(args.game, seed=args.seed, render_mode="rgb_array" if args.video else None)
     if args.video:
         env = gym.wrappers.RecordVideo(env, args.video, episode_trigger=lambda e: True, name_prefix=f"fly-{args.game}")
-    agent = FlyAgent.build(conn, env.observation_space, env.action_space, rnn_steps=args.rnn_steps).to(args.device)
+    agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device)
     if args.checkpoint:
         agent.load_state_dict(torch.load(args.checkpoint, map_location=args.device)["agent"])
     agent.eval()
