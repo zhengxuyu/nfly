@@ -149,3 +149,28 @@ def test_agent_build_calibrates_readout():
     for _ in range(40):                                  # features stay in range well after the reset transient
         feats, h = a.step(torch.rand(6, 84, 84), h)
     assert feats.abs().max() <= 10 and (feats.abs() >= 10).float().mean() < 0.05
+
+
+def test_vector_suites_standardise_observations():
+    import gymnasium as gym
+    env = get_suite("classic").make("cartpole", seed=0)
+    assert any(isinstance(w, gym.wrappers.NormalizeObservation) for w in _wrappers(env))
+    atari = get_suite("atari").make("pong", seed=0)
+    assert not any(isinstance(w, gym.wrappers.NormalizeObservation) for w in _wrappers(atari))
+    env.close(); atari.close()
+
+
+def _wrappers(env):
+    while hasattr(env, "env"):
+        yield env
+        env = env.env
+
+
+def test_mlp_reference_runs_through_simple_trainers():
+    from nfly.rl import PPOConfig, train_ppo
+    from nfly.rl.simple.reference import MLPReference
+    venv = get_suite("classic").make_vector("cartpole", 2)
+    agent = MLPReference(venv.single_observation_space, venv.single_action_space)
+    returns = train_ppo(agent, venv, PPOConfig(rollout=8, updates=3, minibatch_envs=2, log_every=100), log=lambda *_: None)
+    assert isinstance(returns, list)
+    venv.close()
