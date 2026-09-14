@@ -37,10 +37,10 @@ class FlyRLModule(TorchRLModule, ValueFunctionAPI, TargetNetworkAPI):
         conn = select_subset(load_malecns(cfg.get("data_dir", "data"), min_syn=cfg.get("min_syn", 3)),
                              cfg.get("subset", "visual"))
         self.agent = FlyAgent.build(conn, self.observation_space, self.action_space,
-                                    rnn_steps=cfg.get("rnn_steps", 2))
+                                    rnn_steps=cfg.get("rnn_steps", 4))
 
     def get_initial_state(self) -> dict[str, np.ndarray]:
-        return {STATE_KEY: np.zeros(self.agent.n_neurons, dtype=np.float32)}
+        return {STATE_KEY: self.agent.h_rest.detach().cpu().numpy().astype(np.float32)}
 
     def _dist_cls(self):
         return TorchCategorical if isinstance(self.action_space, gym.spaces.Discrete) else TorchDiagGaussian

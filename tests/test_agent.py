@@ -126,3 +126,106 @@ def test_a2c_smoke():
     agent = FlyAgent.build(visual_connectome(), venv.single_observation_space, venv.single_action_space)
     train_a2c(agent, venv, A2CConfig(rollout=4, updates=3, log_every=100), log=lambda *_: None)
     venv.close()
+
+
+def test_readout_norm_calibration_exposes_small_signal():
+    from nfly.interface import ReadoutNorm
+    torch.manual_seed(0)
+    pattern = torch.randn(50) * 5                      # large fixed per-neuron offset
+    signal = torch.randn(200, 50) * 1e-3               # tiny informative part
+    norm = ReadoutNorm(50)
+    norm.calibrate(pattern + signal)
+    out = norm(pattern + signal)
+    assert out.abs().mean() < 3 and 0.5 < out.std(0).mean() < 2      # centred and rescaled to O(1)
+    assert torch.equal(norm(pattern + signal[:1]), norm(pattern + signal[:1]))
+    assert all(p.requires_grad for p in norm.parameters())
+
+
+def test_agent_build_calibrates_readout():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
+    assert not torch.all(a.decoder.norm.mean == 0)      # calibrated, not the default zeros
+    h = a.initial_state(6)
+    for _ in range(40):                                  # features stay in range well after the reset transient
+        feats, h = a.step(torch.rand(6, 84, 84), h)
+    assert feats.abs().max() <= 10 and (feats.abs() >= 10).float().mean() < 0.05
+
+
+def test_vector_suites_standardise_observations():
+    import gymnasium as gym
+    env = get_suite("classic").make("cartpole", seed=0)
+    assert any(isinstance(w, gym.wrappers.NormalizeObservation) for w in _wrappers(env))
+    atari = get_suite("atari").make("pong", seed=0)
+    assert not any(isinstance(w, gym.wrappers.NormalizeObservation) for w in _wrappers(atari))
+    env.close(); atari.close()
+
+
+def _wrappers(env):
+    while hasattr(env, "env"):
+        yield env
+        env = env.env
+
+
+def test_mlp_reference_runs_through_simple_trainers():
+    from nfly.rl import PPOConfig, train_ppo
+    from nfly.rl.simple.reference import MLPReference
+    venv = get_suite("classic").make_vector("cartpole", 2)
+    agent = MLPReference(venv.single_observation_space, venv.single_action_space)
+    returns = train_ppo(agent, venv, PPOConfig(rollout=8, updates=3, minibatch_envs=2, log_every=100), log=lambda *_: None)
+    assert isinstance(returns, list)
+    venv.close()
+
+
+def test_param_groups_scale_brain_and_heads():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
+    rest, heads, brain = a.param_groups(1e-3, brain_scale=0.1, reference_fan_in=2)
+    assert brain["lr"] == pytest.approx(1e-4) and rest["lr"] == 1e-3
+    assert heads["lr"] == pytest.approx(1e-3 * 2 / a.decoder.n_features)
+    names = {id(q): n for n, q in a.named_parameters()}
+    assert all(names[id(q)].startswith("brain.") for q in brain["params"])
+    assert all(names[id(q)].startswith(("value.", "decoder.head", "decoder.proj")) for q in heads["params"])
+    assert sum(len(g["params"]) for g in (rest, heads, brain)) == sum(1 for q in a.parameters() if q.requires_grad)
+
+
+def test_readout_bottleneck_shapes():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
+    feats, _ = a.step(torch.rand(3, 84, 84), a.initial_state(3))
+    assert feats.shape == (3, 8) and a.decoder.n_features == 8 and a.value[0].in_features == 8
+    full = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=None)
+    assert full.decoder.n_features == full.decoder.n_readout
+    # head lr is unscaled with the bottleneck, scaled without it
+    assert a.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3)
+    assert full.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3 * min(1.0, 64 / full.decoder.n_readout))
+
+
+def test_episodes_start_from_the_resting_state():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
+    h0 = a.initial_state(2)
+    assert h0.shape == (2, c.n_neurons) and h0.abs().sum() > 0          # not silence
+    with torch.no_grad():                                                # and (nearly) a fixed point with no input
+        h1 = a.brain.step(h0, None, a.brain.weights())
+    assert torch.allclose(h1, h0, atol=1e-3)
+
+
+def test_calibrated_projection_reconstructs_vector_observations():
+    from nfly import load_malecns
+    from nfly.connectome import write_synthetic
+    import tempfile, pathlib
+    c = load_malecns(write_synthetic(pathlib.Path(tempfile.mkdtemp())), cache=False)
+    space = gym.spaces.Box(-1, 1, (4,), np.float32)
+    a = FlyAgent.build(c, space, gym.spaces.Discrete(2))
+    assert a.decoder.n_features == 4 and a.value[0].in_features == 4    # k shrinks to the observation width
+    r2 = a.calibrate(space)
+    assert r2 is not None and r2 > 0.5
+    # heads still produce the right shapes after the rebuild
+    dist, v, _ = a(torch.rand(3, 4) * 2 - 1, a.initial_state(3))
+    assert dist.sample().shape == (3,) and v.shape == (3,)
+
+
+def test_calibrated_projection_uses_pca_for_images():
+    c = visual_connectome()
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
+    assert a.decoder.n_features == 8 and a.decoder.proj.in_features == a.decoder.n_readout

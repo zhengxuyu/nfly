@@ -44,7 +44,7 @@ class SessionConfig:
     data_dir: str = "data"
     subset: str = "visual"
     min_syn: int = 3
-    rnn_steps: int = 2
+    rnn_steps: int = 4
     checkpoint: str | None = None
     policy: str = "fly"            # fly | random
     greedy: bool = False

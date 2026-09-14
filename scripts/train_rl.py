@@ -11,7 +11,7 @@ import argparse
 import torch
 
 from nfly import FlyAgent
-from nfly.cli import add_agent_args, add_connectome_args, connectome_from_args
+from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, apply_freezes, connectome_from_args
 from nfly.rl import A2CConfig, PPOConfig, train_a2c, train_ppo
 from nfly.suite import get_suite
 
@@ -30,16 +30,19 @@ def main() -> None:
     p.add_argument("--updates", type=int, default=1000)
     p.add_argument("--lr", type=float)
     p.add_argument("--entropy", type=float)
+    p.add_argument("--head-fan-in", type=int, help="PPO: scale head lr by this / n_readout (0 = no scaling)")
     p.add_argument("--out", help="checkpoint path (default runs/<algo>-<suite>-<game>.pt)")
     args = p.parse_args()
     torch.manual_seed(args.seed)
 
     conn = connectome_from_args(args)
     venv = get_suite(args.suite).make_vector(args.game, args.envs, seed=args.seed)
-    agent = FlyAgent.build(conn, venv.single_observation_space, venv.single_action_space, rnn_steps=args.rnn_steps).to(args.device)
-    print(agent.summary())
+    agent = apply_freezes(FlyAgent.build(conn, venv.single_observation_space, venv.single_action_space, **agent_kwargs(args)), args).to(args.device)
+    print(agent.summary(), "| trainable parameters:", f"{sum(q.numel() for q in agent.parameters() if q.requires_grad):,}")
     config_cls, train = TRAINERS[args.algo]
     overrides = {k: v for k, v in dict(rollout=args.rollout, lr=args.lr, entropy=args.entropy).items() if v is not None}
+    if args.algo == "ppo" and args.head_fan_in is not None:
+        overrides["head_fan_in"] = args.head_fan_in or None
     cfg = config_cls(updates=args.updates, out=args.out or f"runs/{args.algo}-{args.suite}-{args.game}.pt", **overrides)
     train(agent, venv, cfg, device=args.device, seed=args.seed)
 

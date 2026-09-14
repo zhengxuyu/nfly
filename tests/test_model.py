@@ -89,3 +89,7 @@ def test_weights_cache_invalidates_after_parameter_update(tmp_path):
     assert w2 is not w1 and torch.allclose(w2.w, w1.w * torch.e)
     with torch.enable_grad():
         assert m.weights().w.requires_grad               # training path never uses the cache
+    with torch.no_grad():
+        m.weights()
+        m.double()                                       # .to() replaces parameter storage
+        assert m.weights().w.dtype == torch.float64      # cache must not hand back the old tensors

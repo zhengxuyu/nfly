@@ -37,6 +37,10 @@ def available_suites() -> list[str]:
     return sorted(_REGISTRY)
 
 
+def _is_vector_box(space: gym.Space) -> bool:
+    return isinstance(space, gym.spaces.Box) and len(space.shape) == 1
+
+
 class GameSuite(ABC):
     """Subclass and implement `games()` and `make()`; everything else has a default."""
 
@@ -66,8 +70,14 @@ class GameSuite(ABC):
         return lambda: self.make(game, seed=seed, **kw)
 
     @staticmethod
-    def finish(env: gym.Env, seed: int | None) -> gym.Env:
-        """Wrap with episode statistics and seed; call at the end of every `make`."""
+    def finish(env: gym.Env, seed: int | None, normalize_obs: bool = True) -> gym.Env:
+        """Wrap with episode statistics and seed; call at the end of every `make`.
+
+        Vector (non-image) Box observations are standardised with running statistics, so
+        dimensions of very different scale (cart position vs pole angle) reach the agent on
+        equal footing."""
+        if normalize_obs and _is_vector_box(env.observation_space):
+            env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if seed is not None:
             env.reset(seed=seed)
