@@ -30,6 +30,9 @@ def test_module_forward_passes(data_dir, obs_space, act_space, dist):
     assert out[Columns.ACTION_DIST_INPUTS].shape == (B, T, n_out)
     assert out[Columns.STATE_OUT]["h"].shape == (B, m.agent.n_neurons)
     assert m.compute_values(batch, out[Columns.EMBEDDINGS]).shape == (B, T)
+    v_full = m.compute_values(batch)                       # GAE path: no grad, chunked over sequences
+    assert v_full.shape == (B, T) and not v_full.requires_grad
+    assert torch.allclose(v_full, m.compute_values(batch, out[Columns.EMBEDDINGS]).detach(), atol=1e-5)
     assert m.get_inference_action_dist_cls().__name__ == dist
     m.forward_inference(batch); m.forward_exploration(batch)
 

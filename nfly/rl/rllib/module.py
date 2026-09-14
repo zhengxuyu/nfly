@@ -21,6 +21,7 @@ from ...agent import FlyAgent
 from ...connectome import load_malecns, select_subset
 
 STATE_KEY = "h"
+VALUE_CHUNK = 8    # sequences per chunk when the GAE connector asks for values of a whole train batch
 
 
 class FlyRLModule(TorchRLModule, ValueFunctionAPI):
@@ -69,6 +70,19 @@ class FlyRLModule(TorchRLModule, ValueFunctionAPI):
                 Columns.STATE_OUT: state_out, Columns.EMBEDDINGS: feats}
 
     def compute_values(self, batch: dict[str, Any], embeddings: Any = None) -> torch.Tensor:
-        if embeddings is None:
-            embeddings, _ = self._unroll(batch)
-        return self.agent.value(embeddings).squeeze(-1)
+        """With `embeddings` (from forward_train) this is the differentiable value head.  Without
+        them RLlib's GAE connector is asking for bootstrap values of an entire train batch: that
+        needs no gradient, so unroll chunk by chunk to keep the (sequences x neurons) state small."""
+        if embeddings is not None:
+            return self.agent.value(embeddings).squeeze(-1)
+        with torch.no_grad():
+            values = [self.agent.value(self._unroll(chunk)[0]).squeeze(-1) for chunk in _split_batch(batch, VALUE_CHUNK)]
+        return torch.cat(values, dim=0)
+
+
+def _split_batch(batch: dict[str, Any], size: int):
+    """Yield sub-batches of `size` sequences: (obs (B,T,...), state_in {h: (B,N)}) slices."""
+    n = batch[Columns.OBS].shape[0]
+    for a in range(0, n, size):
+        yield {Columns.OBS: batch[Columns.OBS][a:a + size],
+               Columns.STATE_IN: {k: v[a:a + size] for k, v in batch[Columns.STATE_IN].items()}}
