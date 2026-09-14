@@ -126,3 +126,17 @@ def test_a2c_smoke():
     agent = FlyAgent.build(visual_connectome(), venv.single_observation_space, venv.single_action_space)
     train_a2c(agent, venv, A2CConfig(rollout=4, updates=3, log_every=100), log=lambda *_: None)
     venv.close()
+
+
+def test_running_norm_removes_constant_pattern():
+    from nfly.interface import RunningNorm
+    torch.manual_seed(0)
+    pattern = torch.randn(50) * 5                      # large fixed per-neuron offset
+    signal = torch.randn(4000, 50) * 1e-3              # tiny informative part
+    norm = RunningNorm(50, momentum=0.05).train()
+    for chunk in (pattern + signal).split(100):
+        out = norm(chunk)
+    norm.eval()
+    out = norm(pattern + signal[:100])
+    assert out.abs().mean() < 3 and out.std(0).mean() > 0.5     # centred and rescaled to O(1)
+    assert torch.allclose(norm(pattern + signal[:1]), norm(pattern + signal[:1]))   # eval is deterministic

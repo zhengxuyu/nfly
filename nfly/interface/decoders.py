@@ -19,13 +19,44 @@ def default_readout_nodes(conn: Connectome) -> torch.Tensor:
     return idx if len(idx) else conn.output_nodes()
 
 
+class RunningNorm(nn.Module):
+    """Per-neuron standardisation with running statistics, applied identically in train and eval.
+
+    Readout neurons sit on a large, nearly constant resting pattern; the observation-dependent
+    part of their activity is orders of magnitude smaller. Normalising each neuron by its own
+    running mean and variance removes that pattern, so the heads (and their gradients) see the
+    part that carries information. Statistics are a cumulative average for the first
+    1/momentum updates (fast, unbiased warm-up), then an exponential moving average; they are
+    updated in train mode only. Outputs are clipped to +-clip so an unseen extreme cannot blow
+    up the heads."""
+
+    def __init__(self, n: int, momentum: float = 0.01, eps: float = 1e-8, clip: float = 10.0):
+        super().__init__()
+        self.momentum, self.eps, self.clip = momentum, eps, clip
+        self.register_buffer("mean", torch.zeros(n))
+        self.register_buffer("var", torch.ones(n))
+        self.register_buffer("count", torch.zeros((), dtype=torch.long))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.training:
+            self._update(x.detach().reshape(-1, x.shape[-1]))
+        return ((x - self.mean) / torch.sqrt(self.var + self.eps)).clamp(-self.clip, self.clip)
+
+    @torch.no_grad()
+    def _update(self, flat: torch.Tensor) -> None:
+        self.count += 1
+        m = max(1.0 / float(self.count), self.momentum)
+        self.mean.lerp_(flat.mean(0), m)
+        self.var.lerp_(flat.var(0, unbiased=False), m)
+
+
 class ActionDecoder(nn.Module):
     idx: torch.Tensor    # (R,) readout node indices
 
     def __init__(self, readout_idx: torch.Tensor):
         super().__init__()
         self.register_buffer("idx", torch.as_tensor(readout_idx, dtype=torch.long))
-        self.norm = nn.LayerNorm(len(readout_idx))
+        self.norm = RunningNorm(len(readout_idx))
 
     @property
     def n_readout(self) -> int:

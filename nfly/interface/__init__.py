@@ -6,8 +6,8 @@ never sees a game-specific type.
 """
 
 from .encoders import ObservationEncoder, RetinaEncoder, ImageProjectionEncoder, VectorEncoder
-from .decoders import ActionDecoder, DiscreteDecoder, BoxDecoder, default_readout_nodes
+from .decoders import ActionDecoder, DiscreteDecoder, BoxDecoder, RunningNorm, default_readout_nodes
 from .retina import Retina, build_retina
 
 __all__ = ["ObservationEncoder", "RetinaEncoder", "ImageProjectionEncoder", "VectorEncoder",
-           "ActionDecoder", "DiscreteDecoder", "BoxDecoder", "default_readout_nodes", "Retina", "build_retina"]
+           "ActionDecoder", "DiscreteDecoder", "BoxDecoder", "RunningNorm", "default_readout_nodes", "Retina", "build_retina"]
