@@ -95,9 +95,10 @@ def build_connectome(neurons: pd.DataFrame, pre, post, syn_count, sign) -> Conne
     missing = [c for c in REQUIRED_COLUMNS if c not in neurons.columns]
     if missing:
         raise ValueError(f"neuron table lacks columns {missing}")
-    pre = torch.as_tensor(np.asarray(pre), dtype=torch.long)
-    post = torch.as_tensor(np.asarray(post), dtype=torch.long)
-    syn_count = torch.as_tensor(np.asarray(syn_count), dtype=torch.float32)
-    sign = torch.as_tensor(np.asarray(sign), dtype=torch.float32)
+    # np.array copies, so read-only views handed out by pandas never back a tensor
+    pre = torch.as_tensor(np.array(pre), dtype=torch.long)
+    post = torch.as_tensor(np.array(post), dtype=torch.long)
+    syn_count = torch.as_tensor(np.array(syn_count), dtype=torch.float32)
+    sign = torch.as_tensor(np.array(sign), dtype=torch.float32)
     weight = normalise_by_post_input(post, syn_count, len(neurons))
     return Connectome(neurons, pre, post, syn_count, sign, weight, neurons["root_id"].to_numpy())
