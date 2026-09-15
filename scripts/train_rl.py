@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 import torch
 
@@ -33,6 +34,8 @@ def main() -> None:
     p.add_argument("--head-fan-in", type=int, help="PPO: scale head lr by this / n_readout (0 = no scaling)")
     p.add_argument("--no-anneal", action="store_true", help="PPO: keep the learning rate constant")
     p.add_argument("--no-adaptive-lr", action="store_true", help="PPO: no KL-based learning-rate scaling")
+    p.add_argument("--set", action="append", default=[], metavar="FIELD=VALUE",
+                   help="any trainer config field, e.g. --set gamma=0.99 --set lam=0.95 --set clip=0.1 --set epochs=4 (JSON values)")
     p.add_argument("--out", help="checkpoint path (default runs/<algo>-<suite>-<game>.pt)")
     args = p.parse_args()
     torch.manual_seed(args.seed)
@@ -52,6 +55,7 @@ def main() -> None:
             overrides["anneal_lr"] = False
         if args.no_adaptive_lr:
             overrides["adaptive_lr"] = False
+    overrides.update({k: json.loads(v) for k, v in (kv.split("=", 1) for kv in args.set)})
     cfg = config_cls(updates=args.updates, out=args.out or f"runs/{args.algo}-{args.suite}-{args.game}.pt", **overrides)
     train(agent, venv, cfg, device=args.device, seed=args.seed)
 
