@@ -50,24 +50,29 @@ def targets_of(env, prev: dict | None) -> tuple[dict, dict]:
     return {**cur, **vel}, cur
 
 
-def decodability(X: torch.Tensor, Y: torch.Tensor, n_components: int = 256) -> torch.Tensor:
-    """Held-out R^2 of a linear decoder of Y from X, robust to many more features than samples:
-    standardise, project to the top principal components (fit on the first half), then ridge
-    with the regularisation strength chosen on a validation split of the training half."""
+def decodability(X: torch.Tensor, Y: torch.Tensor, n_components: int = 256, block: int = 25) -> torch.Tensor:
+    """Held-out R^2 of a linear decoder of Y from X, robust to many more features than samples.
+
+    Standardise (with a relative floor so a rarely active unit cannot explode), project to the
+    top principal components, then ridge with the regularisation chosen by validation. Train,
+    validation and test are interleaved blocks of `block` steps (not first half / second half):
+    in Pong the score digits are the largest changing feature and drift monotonically through
+    a game, so a contiguous split would test extrapolation to unseen scores instead of decoding."""
     std = X.std(0)
-    X = (X - X.mean(0)) / (std + 0.1 * std.mean() + 1e-6)     # relative floor: a rarely active unit must not explode
-    n = len(X) // 2
+    X = (X - X.mean(0)) / (std + 0.1 * std.mean() + 1e-6)
+    part = (torch.arange(len(X)) // block) % 3                 # 0 train, 1 validation, 2 test
+    tr, va, te = (part == 0), (part == 1), (part == 2)
     if X.shape[1] > n_components:
-        _, _, v = torch.pca_lowrank(X[:n], q=n_components, center=False)
+        _, _, v = torch.pca_lowrank(X[tr], q=n_components, center=False)
         X = X @ v
     X1 = torch.cat([X, torch.ones(len(X), 1)], 1)
-    tr, va = X1[: n // 2], X1[n // 2: n]
     def fit(A, B, lam):
         return torch.linalg.solve(A.T @ A + lam * torch.eye(A.shape[1]), A.T @ B)
     def r2(pred, target):
         return 1 - ((pred - target) ** 2).sum(0) / ((target - target.mean(0)) ** 2).sum(0)
-    best = max((float(r2(va @ fit(tr, Y[: n // 2], lam), Y[n // 2: n]).mean()), lam) for lam in (1e-2, 1e-1, 1, 10, 100, 1000))[1]
-    return r2(X1[n:] @ fit(X1[:n], Y[:n], best), Y[n:])
+    best = max((float(r2(X1[va] @ fit(X1[tr], Y[tr], lam), Y[va]).mean()), lam) for lam in (1e-2, 1e-1, 1, 10, 100, 1000))[1]
+    fit_mask = tr | va
+    return r2(X1[te] @ fit(X1[fit_mask], Y[fit_mask], best), Y[te])
 
 
 def main() -> None:
