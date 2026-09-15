@@ -58,7 +58,6 @@ class ActionDecoder(nn.Module):
 
     idx: torch.Tensor    # (R,) readout node indices
 
-    variance_kept: float = 0.99      # readout-subspace calibration keeps this fraction of probe variance
     feature_clip: float = 10.0       # features are clipped after the projection as well
 
     def __init__(self, readout_idx: torch.Tensor, readout_dim: int | None = 32):
@@ -86,34 +85,14 @@ class ActionDecoder(nn.Module):
         """Set the readout normalisation from a probe of states h (M, N) and the bottleneck.
 
         With `targets` (M, T): ridge-regress the normalised readout onto them and install the
-        solution (unit output variance) as the projection; with observations as targets the
-        heads see a reconstruction of what the agent observed (used for vector observations).
-        Without targets: the readout's own top-k principal subspace (used for images, where
-        PCA targets of frames are dominated by large static structures and lose small moving
-        objects such as the Pong ball). Returns the R^2 of the fit, or the variance fraction
-        kept by the subspace."""
+        solution (unit output variance) as the projection, so the heads see a reconstruction of
+        what the agent observed (vectors as they are, images as coarse frame and motion maps).
+        Returns the R^2 of the fit; None when there is no bottleneck."""
         self.norm.calibrate(h[:, self.idx])
-        if not isinstance(self.proj, nn.Linear):
+        if targets is None or not isinstance(self.proj, nn.Linear):
             return None
         with torch.no_grad():
             x = self.norm(h[:, self.idx])
-            if targets is None:                          # no target: the readout's own principal subspace
-                k = min(self.proj.out_features, x.shape[0] - 1, x.shape[1])
-                xc = x - x.mean(0)
-                _, sv, v = torch.pca_lowrank(xc, q=k, center=False)
-                # keep only components with real variance in the probe (99% of it): whitening a
-                # near-null direction turns it into a noise amplifier in play (features of 500
-                # were seen on Pong with all 128 components whitened)
-                explained = (sv ** 2).cumsum(0) / (xc ** 2).sum()
-                k = max(4, int((explained < self.variance_kept).sum()) + 1)
-                v = v[:, :k]
-                scale = (xc @ v).std(0) + 1e-6
-                proj = nn.Linear(x.shape[1], k, bias=True).to(x.device)
-                proj.weight.copy_(v.T / scale.unsqueeze(1))
-                proj.bias.copy_(-(x.mean(0) @ v) / scale)
-                self.proj = proj
-                self._rebuild_heads(k)
-                return float(explained[k - 1])
             k = min(self.proj.out_features, targets.shape[1])
             y = (targets[:, :k] - targets[:, :k].mean(0)) / (targets[:, :k].std(0) + 1e-6)
             xc = x - x.mean(0)

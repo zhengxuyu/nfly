@@ -252,7 +252,7 @@ def test_calibrate_on_env_uses_real_observations_and_motion():
     env = get_suite("atari").make("pong", seed=0)
     a = FlyAgent.build(c, env.observation_space, env.action_space, readout_dim=8)
     r2 = a.calibrate_on_env(env, steps=48)
-    assert r2 is not None and 4 <= a.decoder.n_features <= 8 and a.value[0].in_features == a.decoder.n_features
+    assert r2 is not None and a.decoder.n_features == min(8, a.decoder.n_readout) and a.value[0].in_features == a.decoder.n_features
     dist, v, _ = a(torch.rand(2, 84, 84), a.initial_state(2))
     assert dist.sample().shape == (2,) and v.shape == (2,)
     env.close()
@@ -271,7 +271,7 @@ def test_atari_temporal_contrast_and_retina_high_pass():
     env.close()
 
 
-def test_image_calibration_uses_readout_subspace():
+def test_image_calibration_reconstructs_coarse_maps():
     from nfly import load_malecns
     from nfly.connectome import write_synthetic
     import tempfile, pathlib
@@ -279,8 +279,8 @@ def test_image_calibration_uses_readout_subspace():
     env = get_suite("atari").make("pong", seed=0)
     a = FlyAgent.build(c, env.observation_space, env.action_space)
     assert a.decoder.n_features == min(128, a.decoder.n_readout)      # image default
-    kept = a.calibrate_on_env(env, steps=60)
-    assert kept is not None and 0 < kept <= 1.0 + 1e-4                 # variance fraction kept by the subspace
+    r2 = a.calibrate_on_env(env, steps=60)
+    assert r2 is not None and a.decoder.n_features == min(128, a.decoder.n_readout)
     feats, _ = a.step(torch.as_tensor(env.reset()[0]).unsqueeze(0), a.initial_state(1))
     assert feats.shape[1] == a.decoder.n_features
     env.close()
