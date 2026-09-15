@@ -34,8 +34,8 @@ class PPOConfig:
     value_coef: float = 0.5
     max_grad: float = 0.5
     target_kl: float | None = 0.02
-    anneal_lr: bool = True        # linear decay of every learning rate to 0 over `updates`
-    adaptive_lr: bool = True      # after an update, halve the lr if mean KL > 2 * target_kl, raise it x1.5 if < target_kl / 2
+    anneal_lr: bool = False       # linear decay of every learning rate to 0 over `updates` (off: neutral for the fly, hurt the MLP)
+    adaptive_lr: bool = False     # after an update, halve the lr if mean KL > 2 * target_kl, raise it x1.5 if < target_kl / 2
     adaptive_lr_floor: float = 0.1  # adaptive multiplier stays within [floor, 1]
     clip_reward: bool = True
     log_every: int = 10

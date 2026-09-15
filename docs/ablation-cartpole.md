@@ -198,7 +198,8 @@ linear lr annealing and KL-adaptive lr scaling), 200 updates, one run at a time.
 | v6, constant lr | 228 (peak) | 20 | 13 | 1 of 3 |
 | v7, lr schedule | 24 | 30 | 285 (peak) | 1 of 3 |
 
-**Conclusion.** The lr schedule is neutral (PR #6 will not be merged as a default). The real
+**Conclusion.** The lr schedule is neutral for the fly and hurt the MLP (174 -> 109); it stays
+available but off by default. The real
 instability is not late oscillation but whether a run takes off at all: two thirds of the runs
 never leave random level, while the MLP learns in every seed. Seed 2 stayed flat under v6 and
 reached 285 under v7 with the same initialisation, so take-off is decided by the training
@@ -244,6 +245,18 @@ the photoreceptor drive (gain 4) raised, at the descending neurons, ball y to 0.
 to 0.47 in the layered probe (0.66 / 0.64 in the offline test), with T4/T5 at 0.68 / 0.60.
 **Change:** the Atari suite emits [frame, change] observations and the retina adds
 temporal_gain x change to the drive.
+
+**Readout bottleneck for images.** No frame-based target keeps the ball, so for images the
+bottleneck is now the readout's own principal subspace, keeping the components that explain
+99% of the probe variance (33 on Pong). Whitening all 128 components had turned near-null probe
+directions into noise amplifiers (features of 500 in play; the first PPO update had KL 0.6 and
+the policy was deterministic within ten updates). Features are also clipped after the
+projection.
+
+**Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
+critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the
+RLlib CPU env runners; entropy 1.66-1.78 through the first 100 updates, no collapse; return
+-20.4 at 51k steps (expected this early). Running to 1.5M steps.
 
 ## What is settled and what is open
 

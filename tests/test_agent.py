@@ -238,7 +238,7 @@ def test_ppo_lr_schedule_anneals_and_adapts():
     lines = []
     venv = get_suite("classic").make_vector("cartpole", 2)
     agent = MLPReference(venv.single_observation_space, venv.single_action_space)
-    train_ppo(agent, venv, PPOConfig(rollout=8, updates=4, minibatch_envs=2, log_every=1), log=lambda m: lines.append(m))
+    train_ppo(agent, venv, PPOConfig(rollout=8, updates=4, minibatch_envs=2, log_every=1, anneal_lr=True, adaptive_lr=True), log=lambda m: lines.append(m))
     lrs = [float(l.split("lr")[1].split()[0]) for l in lines]
     assert lrs[0] == 1.0 and lrs[-1] < lrs[0] and all(0.1 <= v <= 1.0 for v in lrs)
     venv.close()
