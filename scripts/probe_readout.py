@@ -54,7 +54,8 @@ def decodability(X: torch.Tensor, Y: torch.Tensor, n_components: int = 256) -> t
     """Held-out R^2 of a linear decoder of Y from X, robust to many more features than samples:
     standardise, project to the top principal components (fit on the first half), then ridge
     with the regularisation strength chosen on a validation split of the training half."""
-    X = (X - X.mean(0)) / (X.std(0) + 1e-6)
+    std = X.std(0)
+    X = (X - X.mean(0)) / (std + 0.1 * std.mean() + 1e-6)     # relative floor: a rarely active unit must not explode
     n = len(X) // 2
     if X.shape[1] > n_components:
         _, _, v = torch.pca_lowrank(X[:n], q=n_components, center=False)
