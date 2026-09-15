@@ -188,6 +188,165 @@ updates with KL 0.02-0.03 cut the epochs to 1-2 by target_kl and still move the 
 enough to lose 100-200 points in ten updates. Stabilising that (smaller head steps once the
 policy is good, or lr annealing) is the next item.
 
+## 9. Seeds: does it take off every time?
+
+**Experiment.** Three seeds each of the v6 configuration (constant lr) and of v7 (v6 plus
+linear lr annealing and KL-adaptive lr scaling), 200 updates, one run at a time.
+
+| Config | seed 0 | seed 1 | seed 2 | took off |
+| --- | --- | --- | --- | --- |
+| v6, constant lr | 228 (peak) | 20 | 13 | 1 of 3 |
+| v7, lr schedule | 24 | 30 | 285 (peak) | 1 of 3 |
+
+**Conclusion.** The lr schedule is neutral for the fly and hurt the MLP (174 -> 109); it stays
+available but off by default. The real
+instability is not late oscillation but whether a run takes off at all: two thirds of the runs
+never leave random level, while the MLP learns in every seed. Seed 2 stayed flat under v6 and
+reached 285 under v7 with the same initialisation, so take-off is decided by the training
+trajectory, not by the initial network.
+
+## 10. RLlib on Pong, and what the readout carries
+
+With the interface fixes and the official RLlib APPO recipe (batch 500, target-network update
+every 2, entropy 0.01 -> 0, vf 1.0, grad clip 40, circular buffer 4 x 2), Pong v4 collapsed to
+zero entropy within 25k steps; v5, with per-group learning rates ported into the RLlib learner
+(brain x0.1, heads by fan-in), collapsed within 5k steps. APPO has no target-KL guard and
+replays every batch twice; this track is parked until the readout question below is settled.
+
+**Probe (scripts/probe_readout.py).** Random-policy Pong, ridge regression of ALE RAM quantities
+from the readout. Held-out R^2 from all 1,314 readout neurons: ball x -0.03, ball y 0.24, ball
+velocity -0.11 / -0.02, player paddle y 0.82, cpu paddle y 0.68. From the 32 calibrated
+features: worse. The descending neurons carry the paddles and not the ball: a 2x4-pixel object
+lands on one or two of 5,494 photoreceptors and is diluted away through the optic lobe. No
+trainer can learn Pong from this readout.
+
+**Stage-by-stage probe** (after making the probe robust: PCA to 256 components, ridge with
+validated strength, interleaved block splits because the score digits drift through a game).
+Held-out R^2, random-policy Pong:
+
+| Stage | ball y | ball dy | player paddle y |
+| --- | --- | --- | --- |
+| photoreceptor drive (pixels sampled by the retina) | 0.33 | 0.42 | -0.09 |
+| lamina L1-L5 | 0.63 | 0.41 | 0.86 |
+| T4/T5 motion detectors | 0.61 | 0.46 | 0.86 |
+| visual projection neurons | 0.66 | 0.49 | 0.87 |
+| descending neurons (1,314) | 0.64 | 0.42 | 0.86 |
+| 32 calibrated features (regressed onto [frame, diff] PCA) | 0.35 | 0.16 | 0.76 |
+
+Ball x is not linearly decodable at any stage (it is not needed for Pong). Ball y and its
+vertical velocity travel from the lamina to the descending neurons and are lost in the last
+step, the calibrated projection: PCA targets of frames are dominated by paddles and score
+digits. No PCA-based target (frame, [frame, diff], diff only, k up to 128) or the readout's own
+PCA kept ball velocity.
+
+**Temporal contrast.** Real photoreceptors and lamina cells respond to change and adapt to
+steady light; the rate model has no adaptation. Adding the change since the previous frame to
+the photoreceptor drive (gain 4) raised, at the descending neurons, ball y to 0.65 and ball dy
+to 0.47 in the layered probe (0.66 / 0.64 in the offline test), with T4/T5 at 0.68 / 0.60.
+**Change:** the Atari suite emits [frame, change] observations and the retina adds
+temporal_gain x change to the drive.
+
+**Readout bottleneck for images.** Every linear bottleneck tried loses part of the ball.
+Held-out R^2 of ball y / ball vertical velocity from the calibrated features, Pong, random
+play (the raw 1,314-d normalised readout has 0.66 / 0.50):
+
+| Projection target | ball y | ball dy |
+| --- | --- | --- |
+| frame PCA, k=32 / 128 | 0.32 / 0.50 | -0.33 / -0.61 |
+| [frame, diff] PCA, k=32 (first image target) | 0.05 | -0.08 |
+| readout's own PCA, k=26 (99% variance) / 64 / 128 | 0.31 / 0.41 / 0.45 | 0.15 / 0.25 / 0.22 |
+| coarse 8x8 maps of frame and |change|, 128-d (adopted) | 0.47 | 0.28 |
+
+Whitening all 128 readout components had also turned near-null probe directions into noise
+amplifiers (features of 500 in play; the first PPO update had KL 0.6 and the policy was
+deterministic within ten updates); features are now clipped after the projection as well.
+
+**Run v7** (26-d readout subspace): 435k steps, return -21, entropy 1.5, no learning; stopped.
+**Run v8a** (no bottleneck: linear head on all 1,314 descending neurons, MLP critic): 717k
+steps, return -20.65, entropy 0.9-1.5, no learning. Twice the budget in which the CNN solved
+Pong on the same machine. Removing the bottleneck did not help, so the loss at the bottleneck
+was not what stood between the fly and Pong.
+
+**Run v8c** (as v8a with a 64-unit tanh MLP policy head, a diagnostic control that is not the
+model's claim): 660k steps, return -20.35, entropy 1.68, no learning. (A first launch had the
+whole head scaled to lr x 64/1314 by the fan-in rule and never moved; the rule now scales each
+layer by its own fan-in.) So the linear readout is not the limit either: the ball signal at the
+descending neurons (R^2 0.66 for position, 0.50 for vertical velocity) is too weak for control,
+and the work moves upstream, to the retina encoding and the network dynamics.
+
+## 11. Upstream: retina and dynamics (probe sweep)
+
+Probe sweeps on Pong, ball position / ball vertical velocity (R^2) at the descending neurons:
+
+| Setting (rnn 4, alpha 0.7 unless noted) | ball y | ball dy |
+| --- | --- | --- |
+| temporal gain 4 (previous default) | 0.64 | 0.56 |
+| temporal gain 8 | 0.69 | 0.60 |
+| surround 2 / 4, temporal gain 4 | 0.72 / 0.73 | 0.61 / 0.62 |
+| surround 4, temporal gain 8 | 0.72 | 0.65 |
+| alpha 0.5 / 0.9 | 0.75 / 0.63 | 0.48 / 0.60 |
+| rnn 8, alpha 0.5 / 0.7 / 0.9 | 0.64 / 0.60 / 0.58 | 0.58 / 0.65 / 0.61 |
+| input gain 2 / 10 (surround 4, gain 8) | 0.70 / 0.73 | 0.61 / 0.63 |
+| **both eyes sampling the whole frame** (surround 4, gain 8) | **0.86** | **0.68** (ball x velocity 0.19 -> 0.65) |
+
+Dynamics settings and input gain move little; the spatial and temporal high-pass help by
+about 0.1 each; sampling density is the lever: letting both eyes see the whole frame instead of
+one hemifield each doubles the photoreceptors a small object hits. **Change:** defaults are now
+full-field sampling, surround 4, temporal gain 8.
+
+**Run v9** (these defaults, otherwise as v8a): 916k steps, return -20.55, entropy 1.2, no
+learning. With ball y at R^2 0.86 and paddle y at 0.84 in the readout, a linear rule (move
+towards the ball) is representable, yet RL did not find it in 2.5x the CNN's budget. Next test:
+behaviour cloning of a heuristic Pong teacher on the frozen readout (`scripts/bc_pong.py`), the
+same sufficiency test that settled CartPole, to separate "the readout cannot support control"
+from "RL cannot find the head under Pong's sparse, delayed reward".
+
+**Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
+critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the
+RLlib CPU env runners; entropy 1.66-1.78 through the first 100 updates, no collapse; return
+-20.4 at 51k steps; -21.0 at 310k steps with entropy 1.37 (running to 1.5M steps).
+
+**CNN baseline on the same machine** (`scripts/baseline_cnn_pong.py`, RLlib's tuned Atari
+PPO with 4-frame stacking): -19 at 280k steps, +6 at 320k, +14.5 at 352k, **+19 at 356k**,
+25 minutes wall clock. That is the bar: a conventional policy learns Pong here in a third of
+a million steps; the fly at the same step count shows no movement.
+
+## 12. Is the Pong readout sufficient? (behaviour cloning from the CNN)
+
+**Experiment.** `scripts/bc_pong.py --readout-dim 0 --teacher runs/baseline-cnn-pong`: frozen,
+untrained `visual` network with the v9 retina, no readout bottleneck (all 1,314 descending
+neurons); the trained CNN baseline (+19 in its own env) is the teacher. It reads the raw
+210x160 screen through RLlib's own grayscale / 64x64 / uint8 / 128 - 1 preprocessing and a
+4-frame stack, so it plays inside the fly's suite env; its score there is printed as a control.
+Record 6,000 steps (30% random actions for coverage), fit a head by cross-entropy, play 3
+episodes with the head alone.
+
+Two pitfalls on the way, both visible as a bad teacher rather than a bad clone: feeding the
+suite's [0, 1] frames to a CNN trained on [-1, 1] gave a one-action teacher (-21); resizing the
+suite's 84x84 frame instead of the raw screen left it at -3.
+
+**Result.**
+
+| Head on the frozen 1,314-d readout | Fit accuracy (train / held-out) | Cloned head plays | Teacher in the same env |
+| --- | --- | --- | --- |
+| linear | 61.3% / 55.6% | **-9.7** (episodes 12, -20, -21) | 6.0 (19, 16, -17) |
+| 64-unit tanh MLP | 85.5% / 62.3% | **+8.0** (episodes 19, 20, -15) | 6.0 (19, 16, -17) |
+
+Both heads reproduce the teacher only about 60% of the time on held-out steps, yet the MLP head
+wins two of three episodes 19-20 to the CNN's 19 and 16, and the linear head wins one (+12).
+The third episode is a start state that also beats the teacher (-17). Nothing trained by RL on
+this readout ever left -20.
+
+**Conclusion.** The frozen, untrained connectome with the calibrated readout carries enough
+information to play Pong at the CNN's level: a 64-unit head fitted from 6,000 supervised
+steps does it. The failure of v7-v9 (up to 916k RL steps at -20.5) is therefore not the retina,
+the dynamics, or the readout; it is credit assignment. Pong's reward arrives 20-60 frames after
+the decisive paddle move, and the 1,314-d (linear) or 85k-parameter (MLP) head has to be found
+from that signal alone, where the CNN's convolutional inductive bias makes the same search easy.
+The natural next steps are on the RL side: initialise the head from behaviour cloning and let
+PPO continue (DAgger-style), or shape the reward with the ball-paddle distance, before touching
+the brain again.
+
 ## What is settled and what is open
 
 Settled:
@@ -197,6 +356,9 @@ Settled:
 - Three interface defects were real and are fixed: readout hidden by the resting pattern,
   fast components filtered by one step per frame, a 10x transient at every reset.
 - Collapse comes from high-dimensional or high-rate heads, not from the brain parameters.
+- Pong: the frozen, untrained network with the full-field retina and the 1,314-d readout
+  supports Pong at the CNN's level; a 64-unit head behaviour-cloned from the CNN in 6,000
+  steps scores +19 / +20 in two of three episodes (section 12).
 
 Settled by v6:
 - With the MLP critic, RL finds the head: 228 at update 190 versus the MLP's 174.
@@ -204,6 +366,12 @@ Settled by v6:
   to random twice; the trainable run is steadier and higher.
 
 Open:
-- Stability: both runs oscillate by 100-200 points between updates late in training.
-- Everything above is CartPole; Pong will re-open the question of what the optic lobe
-  contributes beyond transmission.
+- Take-off: only about one seed in three learns CartPole at all (section 9).
+- Pong, RL: no run has left -20.5 (v7-v9, up to 916k steps), although the readout is
+  sufficient (section 12). Credit assignment is the open problem; behaviour-cloned
+  initialisation or reward shaping are the untried levers.
+- Take-off on CartPole is not fixed by entropy 0.01 (seeds 1, 2 stayed at 20-44) or by 64 envs
+  (seed 1 stayed at 20).
+- RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
+- What the optic lobe contributes beyond transmission is still unmeasured; section 12 shows
+  transmission alone is enough for Pong once a head is found.

@@ -33,7 +33,7 @@ class ObservationEncoder(nn.Module):
         coordinates, else ImageProjectionEncoder.  Other Box / Discrete -> VectorEncoder onto
         sensory neurons.
         """
-        if isinstance(space, gym.spaces.Box) and len(space.shape) in (2, 3) and min(space.shape) >= 8:
+        if isinstance(space, gym.spaces.Box) and len(space.shape) in (2, 3) and min(space.shape[-2:]) >= 8:
             if prefer_retina and (conn.neurons.get("hex1", None) is not None) and (conn.neurons["hex1"] >= 0).any():
                 try:
                     return RetinaEncoder(conn, space, **kw)
@@ -44,16 +44,24 @@ class ObservationEncoder(nn.Module):
 
 
 def _to_gray_2d(obs: torch.Tensor, space: gym.spaces.Box) -> torch.Tensor:
-    """(B,H,W) | (B,H,W,C) | (B,C,H,W) uint8/float -> (B,H,W) float in [0,1]."""
+    """(B,H,W) | (B,H,W,C) | (B,C,H,W) uint8/float -> (B,H,W) float in [0,1].
+    A (B,2,H,W) observation is [frame, change] (TemporalContrast): only the frame is returned."""
     x = obs.float()
     if space.dtype == np.uint8 or float(space.high.max()) > 1.0:
         x = x / 255.0
     if x.dim() == 4:
-        if x.shape[-1] in (1, 3, 4):
+        if x.shape[1] == 2:
+            x = x[:, 0]
+        elif x.shape[-1] in (1, 3, 4):
             x = x.mean(-1)
         else:
             x = x.mean(1)
     return x
+
+
+def _change_2d(obs: torch.Tensor) -> torch.Tensor | None:
+    """The change channel of a (B,2,H,W) TemporalContrast observation, else None."""
+    return obs.float()[:, 1] if obs.dim() == 4 and obs.shape[1] == 2 else None
 
 
 def _finite_bounds(space: gym.Space) -> tuple[torch.Tensor | None, torch.Tensor | None]:
@@ -72,16 +80,38 @@ def _sensory_nodes(conn: Connectome, n: int | None, seed: int) -> np.ndarray:
 
 
 class RetinaEncoder(ObservationEncoder):
-    """Frames sampled at the compound eye's photoreceptor positions (MaleCNS hex columns)."""
+    """Frames sampled at the compound eye's photoreceptor positions (MaleCNS hex columns).
 
-    def __init__(self, conn: Connectome, space: gym.spaces.Box, mode: str = "photoreceptors", **kw):
+    With a [frame, change] observation the drive is contrast(frame) + surround * (frame minus
+    its local mean) + temporal_gain * change, all sampled at the same positions: a spatial and a
+    temporal high-pass, standing in for the antagonistic surround and the transient response of
+    real photoreceptors and lamina cells. Defaults come from a probe sweep on Pong (ball y /
+    vertical velocity at the descending neurons): plain contrast 0.45 / 0.41; temporal gain 4 ->
+    0.64 / 0.56; temporal gain 8 + surround 4 -> 0.72 / 0.65; plus both eyes sampling the whole
+    frame (Retina split=False) -> 0.86 / 0.68."""
+
+    def __init__(self, conn: Connectome, space: gym.spaces.Box, mode: str = "photoreceptors",
+                 temporal_gain: float = 8.0, surround: float = 4.0, surround_size: int = 9, **kw):
+        """surround: weight of a centre-surround term, frame minus its local mean over a
+        surround_size x surround_size window, added to the drive. Real lamina cells (L1/L2)
+        have antagonistic surrounds; this makes small objects stand out against uniform
+        backgrounds. 0 disables it."""
         super().__init__()
-        self.space = space
+        self.space, self.temporal_gain, self.surround, self.surround_size = space, temporal_gain, surround, surround_size
         self.retina: Retina = build_retina(conn, mode=mode, **kw)
         self.register_buffer("idx", self.retina.idx.clone())
 
     def encode(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.retina.encode(_to_gray_2d(obs, self.space))
+        frame = _to_gray_2d(obs, self.space)
+        drive = self.retina.encode(frame)
+        if self.surround:
+            local_mean = nn.functional.avg_pool2d(frame.unsqueeze(1), self.surround_size, stride=1,
+                                                 padding=self.surround_size // 2, count_include_pad=False).squeeze(1)
+            drive = drive + self.surround * self.retina.sample(frame - local_mean)
+        change = _change_2d(obs)
+        if change is not None:
+            drive = drive + self.temporal_gain * self.retina.sample(change)
+        return drive
 
 
 class ImageProjectionEncoder(ObservationEncoder):

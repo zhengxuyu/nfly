@@ -83,3 +83,22 @@ def test_appo_trains_end_to_end(data_dir, tmp_path):
         assert "default_policy" in result.get("learners", {})
     finally:
         ray.shutdown()
+
+
+def test_learner_registers_per_group_optimizers(data_dir):
+    import ray
+    from nfly.rl.rllib.learner import FlyPPOTorchLearner
+    ray.init(num_cpus=2, include_dashboard=False, log_to_driver=False, ignore_reinit_error=True)
+    try:
+        cfg = build_config("PPO", suite="classic", game="cartpole", data_dir=data_dir, subset="all", min_syn=1,
+                           num_env_runners=0, train_batch_size=64, minibatch_size=32, num_epochs=1, max_seq_len=8, lr=1e-3)
+        assert cfg.learner_class is FlyPPOTorchLearner
+        algo = cfg.build_algo()
+        learner = algo.learner_group._learner
+        by_name = {name: opt for name, opt in learner.get_optimizers_for_module("default_policy")}
+        assert {"rest", "heads", "brain"} <= set(by_name)
+        assert learner.get_optimizer("default_policy", "brain").param_groups[0]["lr"] == pytest.approx(1e-4)
+        assert learner.get_optimizer("default_policy", "heads").param_groups[0]["lr"] == pytest.approx(1e-3)
+        algo.train()
+    finally:
+        ray.shutdown()

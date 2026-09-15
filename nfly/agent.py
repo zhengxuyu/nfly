@@ -21,6 +21,10 @@ from .interface.decoders import ActionDecoder
 from .interface.encoders import ObservationEncoder
 
 
+def _is_image(space: gym.Space) -> bool:
+    return isinstance(space, gym.spaces.Box) and len(space.shape) in (2, 3) and min(space.shape[-2:]) >= 8
+
+
 def value_head(n_features: int, hidden: int = 64) -> nn.Module:
     """A small tanh MLP critic. The policy stays linear on the readout, so this changes nothing
     about how the fly acts; it only gives training a value function that can fit the task
@@ -29,15 +33,26 @@ def value_head(n_features: int, hidden: int = 64) -> nn.Module:
     return nn.Sequential(nn.Linear(n_features, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, 1))
 
 
-def _projection_targets(observed: torch.Tensor, k: int) -> torch.Tensor:
-    """What the readout projection should reconstruct: vector observations as they are, images
-    (or any observation with more than k values) through their top-k principal components."""
+COARSE_MAP = 8   # images are reconstructed as coarse frame and motion maps of this size
+
+
+def _projection_targets(observed: torch.Tensor, k: int, previous: torch.Tensor | None = None) -> torch.Tensor:
+    """What the readout projection should reconstruct.
+
+    Vector observations: as they are. Images: coarse maps (COARSE_MAP x COARSE_MAP, average
+    pooled) of the frame and of the absolute change since the previous frame, i.e. where things
+    are and where things move. Principal components of frames were tried first and lose small
+    moving objects: on Pong the descending neurons carry ball y / vertical velocity at R^2
+    0.66 / 0.50, frame-PCA features kept 0.35 / 0.16 and the readout's own PCA 0.31 / 0.15, the
+    coarse maps 0.47 / 0.28, the best of the targets tried."""
     flat = observed.reshape(observed.shape[0], -1)
-    if flat.shape[1] <= k:
+    if observed.dim() < 3 or flat.shape[1] <= k:                 # vectors are reconstructed as they are
         return flat
-    centred = flat - flat.mean(0)
-    _, _, v = torch.pca_lowrank(centred, q=k, center=False)
-    return centred @ v
+    frames = observed if observed.dim() == 3 else observed[:, 0]
+    change = (observed[:, 1] if observed.dim() == 4 and observed.shape[1] == 2
+              else frames - previous.reshape(frames.shape) if previous is not None else torch.zeros_like(frames))
+    pool = lambda img: nn.functional.adaptive_avg_pool2d(img.unsqueeze(1), COARSE_MAP).flatten(1)
+    return torch.cat([pool(frames), pool(change.abs())], 1)
 
 
 class FlyAgent(nn.Module):
@@ -61,11 +76,18 @@ class FlyAgent(nn.Module):
     def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
               input_gain: float = 5.0, alpha_init: float = 0.7, global_scale: float = 1.0, bias_init: float = 0.1,
               encoder: ObservationEncoder | None = None, decoder: ActionDecoder | None = None,
-              readout_idx: torch.Tensor | None = None, readout_dim: int | None = 32,
+              readout_idx: torch.Tensor | None = None, readout_dim: int | None = None, head_hidden: int = 0,
               encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
+        """readout_dim: width of the readout bottleneck; None picks 32 for vector observations
+        (calibrated to reconstruct the observation) and 128 for images (calibrated to reconstruct
+        coarse frame and motion maps); 0 means no bottleneck."""
+        if readout_dim is None:
+            readout_dim = 128 if _is_image(obs_space) else 32
+        elif readout_dim == 0:
+            readout_dim = None                                        # explicit: no bottleneck
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
         enc = encoder or ObservationEncoder.for_space(conn, obs_space, **(encoder_kw or {}))
-        dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim)
+        dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim, head_hidden)
         agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain)
         agent.calibrate(obs_space)
         return agent
@@ -110,6 +132,31 @@ class FlyAgent(nn.Module):
         self.value = value_head(self.decoder.n_features).to(dev)
         return r2
 
+    @torch.no_grad()
+    def calibrate_on_env(self, env: gym.Env, steps: int = 512, seed: int = 0) -> float | None:
+        """Calibrate the readout on real observations: a random-policy rollout of `steps` env
+        steps (episodes reset as they end), instead of the synthetic probe of `calibrate`.
+        Needed for images, where random samples of the observation space are noise and say
+        nothing about what frames look like. Uses the resting state set by `calibrate`."""
+        dev = self.input_gain.device
+        weights = self.brain.weights()
+        obs, _ = env.reset(seed=seed)
+        h = self.initial_state(1)
+        states, observed, previous = [], [], []
+        prev = torch.as_tensor(np.asarray(obs), device=dev).float()
+        for _ in range(steps):
+            x = torch.as_tensor(np.asarray(obs), device=dev).float()
+            _, h = self.step(x.unsqueeze(0), h, weights)
+            states.append(h); observed.append(x); previous.append(prev)
+            prev = x
+            obs, _, term, trunc, _ = env.step(env.action_space.sample())
+            if term or trunc:
+                obs, _ = env.reset(); h = self.initial_state(1); prev = torch.as_tensor(np.asarray(obs), device=dev).float()
+        states, observed, previous = torch.cat(states), torch.stack(observed), torch.stack(previous)
+        r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features, previous))
+        self.value = value_head(self.decoder.n_features).to(dev)
+        return r2
+
     @property
     def n_neurons(self) -> int:
         return self.brain.n
@@ -130,23 +177,26 @@ class FlyAgent(nn.Module):
         brain      lr * brain_scale: millions of edge gains under Adam each move by about lr per
                    update, which shifts the whole network; a smaller step keeps updates in the
                    trust region.
-        heads      lr * min(1, reference_fan_in / n_features): with Adam the logit shift per
-                   update grows with the number of head inputs, so heads reading more than
-                   reference_fan_in features get a proportionally smaller rate (no scaling
-                   with the default 32-dimensional readout bottleneck).
+        heads      per weight matrix, lr * min(1, reference_fan_in / fan_in): with Adam the shift
+                   of a layer's output per update grows with its fan-in, so a layer reading 1,314
+                   readout neurons steps 20x more gently than one reading 64 features. Biases and
+                   the layers of a bottlenecked head (fan-in <= reference) keep the full lr.
         the rest   lr (encoder projection, input gain, readout normalisation)."""
-        brain, heads, rest = [], [], []
+        rest, brain, by_lr = [], [], {}
         for name, q in self.named_parameters():
             if not q.requires_grad:
                 continue
             if name.startswith("brain."):
                 brain.append(q)
             elif name.startswith("value.") or name.startswith("decoder.") and not name.startswith("decoder.norm."):
-                heads.append(q)
+                fan_in = q.shape[1] if q.dim() == 2 else 1
+                by_lr.setdefault(lr * min(1.0, reference_fan_in / fan_in), []).append(q)
             else:
                 rest.append(q)
-        head_lr = lr * min(1.0, reference_fan_in / self.decoder.n_features)
-        return [{"params": rest, "lr": lr}, {"params": heads, "lr": head_lr}, {"params": brain, "lr": lr * brain_scale}]
+        groups = [{"params": rest, "lr": lr}]
+        groups += [{"params": ps, "lr": g_lr} for g_lr, ps in sorted(by_lr.items(), reverse=True)]
+        groups.append({"params": brain, "lr": lr * brain_scale})
+        return groups
 
     def step(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """One env step: obs (B, ...) and state h (B, N) -> readout features (B, R) and new h.

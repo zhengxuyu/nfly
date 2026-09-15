@@ -77,6 +77,7 @@ def build_session(cfg: SessionConfig) -> Session:
     else:
         conn = select_subset(load_malecns(cfg.data_dir, min_syn=cfg.min_syn), cfg.subset)
         agent = FlyAgent.build(conn, env.observation_space, env.action_space, rnn_steps=cfg.rnn_steps).to(cfg.device)
+        agent.calibrate_on_env(get_suite(cfg.suite).make(cfg.game, seed=cfg.seed + 1000))
         if cfg.checkpoint:
             agent.load_state_dict(torch.load(cfg.checkpoint, map_location=cfg.device)["agent"])
         policy = agent.eval()
