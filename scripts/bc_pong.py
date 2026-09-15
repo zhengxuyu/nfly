@@ -32,10 +32,10 @@ class CNNTeacher:
     most of its score (checked by playing it)."""
 
     def __init__(self, checkpoint: str, device: str):
-        from ray.rllib.algorithms.algorithm import Algorithm
-        import ray
-        ray.init(ignore_reinit_error=True, include_dashboard=False, log_to_driver=False)
-        self.module = Algorithm.from_checkpoint(checkpoint).get_module("default_policy").to(device)
+        import os
+        from ray.rllib.core.rl_module.rl_module import RLModule
+        module_dir = os.path.join(checkpoint, "learner_group", "learner", "rl_module", "default_policy")
+        self.module = RLModule.from_checkpoint(module_dir).to(device).eval()
         self.device, self.stack = device, []
 
     def reset(self):
