@@ -13,6 +13,7 @@ from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 from ray.tune.registry import get_trainable_cls
 
 from .env import register_nfly_env
+from .learner import LEARNERS
 from .module import FlyRLModule
 
 
@@ -35,7 +36,9 @@ def build_config(algo: str = "PPO", suite: str = "atari", game: str = "pong", da
               .rl_module(rl_module_spec=module)
               # minibatch_size bounds the learner's unroll batch for every algorithm; without it
               # APPO / IMPALA unroll the whole train batch at once and run out of GPU memory
-              .training(train_batch_size_per_learner=train_batch_size, minibatch_size=minibatch_size, lr=lr, **training_kw))
+              # per-group learning rates (brain x0.1, heads by fan-in), as in the simple trainers
+              .training(learner_class=LEARNERS.get(algo), train_batch_size_per_learner=train_batch_size,
+                        minibatch_size=minibatch_size, lr=lr, **training_kw))
     if algo == "PPO":
         config = config.training(num_epochs=num_epochs)
     return config
