@@ -268,10 +268,17 @@ Pong on the same machine. Removing the bottleneck did not help, so the loss at t
 was not what stood between the fly and Pong.
 
 **Run v8c** (as v8a with a 64-unit tanh MLP policy head, a diagnostic control that is not the
-model's claim): in progress. If it learns, the descending neurons carry enough and the linear
-readout is the limit; if it does not, the ball signal at the descending neurons (R^2 0.66 for
-position, 0.50 for vertical velocity) is itself too weak for control and the work moves
-upstream, to the retina encoding and the optic lobe.
+model's claim): 660k steps, return -20.35, entropy 1.68, no learning. (A first launch had the
+whole head scaled to lr x 64/1314 by the fan-in rule and never moved; the rule now scales each
+layer by its own fan-in.) So the linear readout is not the limit either: the ball signal at the
+descending neurons (R^2 0.66 for position, 0.50 for vertical velocity) is too weak for control,
+and the work moves upstream, to the retina encoding and the network dynamics.
+
+## 11. Upstream: retina and dynamics (probe sweep)
+
+A probe sweep (`runs/sweep-retina.sh`: centre-surround weight 0 / 2 / 4, temporal gain 4 / 8,
+network steps per frame 4 / 8, leak 0.5 / 0.7 / 0.9) measures ball position and vertical
+velocity at the descending neurons for each setting; results below when complete.
 
 **Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
 critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the
