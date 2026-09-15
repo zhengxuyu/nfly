@@ -246,12 +246,25 @@ to 0.47 in the layered probe (0.66 / 0.64 in the offline test), with T4/T5 at 0.
 **Change:** the Atari suite emits [frame, change] observations and the retina adds
 temporal_gain x change to the drive.
 
-**Readout bottleneck for images.** No frame-based target keeps the ball, so for images the
-bottleneck is now the readout's own principal subspace, keeping the components that explain
-99% of the probe variance (33 on Pong). Whitening all 128 components had turned near-null probe
-directions into noise amplifiers (features of 500 in play; the first PPO update had KL 0.6 and
-the policy was deterministic within ten updates). Features are also clipped after the
-projection.
+**Readout bottleneck for images.** Every linear bottleneck tried loses part of the ball.
+Held-out R^2 of ball y / ball vertical velocity from the calibrated features, Pong, random
+play (the raw 1,314-d normalised readout has 0.66 / 0.50):
+
+| Projection target | ball y | ball dy |
+| --- | --- | --- |
+| frame PCA, k=32 / 128 | 0.32 / 0.50 | -0.33 / -0.61 |
+| [frame, diff] PCA, k=32 (first image target) | 0.05 | -0.08 |
+| readout's own PCA, k=26 (99% variance) / 64 / 128 | 0.31 / 0.41 / 0.45 | 0.15 / 0.25 / 0.22 |
+| coarse 8x8 maps of frame and |change|, 128-d (adopted) | 0.47 | 0.28 |
+
+Whitening all 128 readout components had also turned near-null probe directions into noise
+amplifiers (features of 500 in play; the first PPO update had KL 0.6 and the policy was
+deterministic within ten updates); features are now clipped after the projection as well.
+
+**Run v7** (26-d readout subspace): 435k steps, return -21, entropy 1.5, no learning; stopped.
+**Runs v8a / v8b** (no bottleneck, 1,314-d heads / coarse-map 128-d bottleneck), in progress:
+they decide whether the remaining loss at the bottleneck is what stands between the fly and
+Pong, or whether the ball signal at the descending neurons (0.66 / 0.50) is itself too weak.
 
 **Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
 critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the
