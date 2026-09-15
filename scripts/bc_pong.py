@@ -24,6 +24,35 @@ from nfly.suite import get_suite
 UP, DOWN, NOOP = 2, 3, 0      # ALE Pong: RIGHT = up, LEFT = down
 
 
+class CNNTeacher:
+    """The trained CNN baseline (scripts/baseline_cnn_pong.py checkpoint) as the teacher.
+
+    The baseline saw 64x64 grayscale frames stacked 4 deep; here our 84x84 frame is resized to
+    64x64 and stacked over the last four env steps, which is close enough for the CNN to keep
+    most of its score (checked by playing it)."""
+
+    def __init__(self, checkpoint: str, device: str):
+        from ray.rllib.algorithms.algorithm import Algorithm
+        import ray
+        ray.init(ignore_reinit_error=True, include_dashboard=False, log_to_driver=False)
+        self.module = Algorithm.from_checkpoint(checkpoint).get_module("default_policy").to(device)
+        self.device, self.stack = device, []
+
+    def reset(self):
+        self.stack = []
+
+    def __call__(self, obs_frame: np.ndarray) -> int:
+        frame = torch.as_tensor(obs_frame[0] if obs_frame.ndim == 3 else obs_frame, device=self.device).float()
+        small = torch.nn.functional.interpolate(frame[None, None], size=(64, 64), mode="area")[0, 0]
+        self.stack = (self.stack + [small])[-4:]
+        while len(self.stack) < 4:
+            self.stack.insert(0, self.stack[0])
+        obs = torch.stack(self.stack, -1)[None]                      # (1, 64, 64, 4)
+        with torch.no_grad():
+            out = self.module.forward_inference({"obs": obs})
+        return int(out["action_dist_inputs"][0].argmax())
+
+
 def teacher_action(env, dead_zone: int = 3) -> int:
     ram = env.unwrapped.ale.getRAM()
     ball_y, paddle_y = int(ram[54]), int(ram[51])
@@ -36,14 +65,16 @@ def teacher_action(env, dead_zone: int = 3) -> int:
     return NOOP
 
 
-def play(env, agent, policy, episodes: int, device: str, max_steps: int = 6000) -> list[float]:
+def play(env, agent, policy, episodes: int, device: str, max_steps: int = 6000, teacher=None) -> list[float]:
     rets = []
     for ep in range(episodes):
         obs, _ = env.reset(seed=500 + ep); h = agent.initial_state(1); total = 0.0
+        if teacher is not None:
+            teacher.reset()
         for _ in range(max_steps):
             with torch.no_grad():
                 f, h = agent.step(torch.as_tensor(np.asarray(obs), device=device).unsqueeze(0), h)
-            obs, r, term, trunc, _ = env.step(policy(f, env)); total += r
+            obs, r, term, trunc, _ = env.step(policy(f, env, obs)); total += r
             if term or trunc:
                 break
         rets.append(total)
@@ -58,6 +89,7 @@ def main() -> None:
     p.add_argument("--noise", type=float, default=0.3, help="teacher exploration: fraction of random actions")
     p.add_argument("--hidden", type=int, default=0, help="0 = linear head; else tanh MLP width")
     p.add_argument("--episodes", type=int, default=3)
+    p.add_argument("--teacher", default="heuristic", help="'heuristic' (RAM rule) or path to a baseline_cnn_pong checkpoint")
     args = p.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
@@ -66,21 +98,26 @@ def main() -> None:
     agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device).eval()
     calibrate_on(agent, get_suite("atari").make("pong", seed=args.seed + 1000))
     n_actions = env.action_space.n
+    cnn = None if args.teacher == "heuristic" else CNNTeacher(args.teacher, args.device)
+    def teach(env, obs):
+        return teacher_action(env) if cnn is None else cnn(np.asarray(obs))
 
     obs, _ = env.reset(); h = agent.initial_state(1); F, A = [], []
+    if cnn: cnn.reset()
     with torch.no_grad():
         for _ in range(args.steps):
             f, h = agent.step(torch.as_tensor(np.asarray(obs), device=args.device).unsqueeze(0), h)
-            a_star = teacher_action(env)
+            a_star = teach(env, obs)
             F.append(f[0]); A.append(a_star)
             a = env.action_space.sample() if np.random.rand() < args.noise else a_star
             obs, _, term, trunc, _ = env.step(a)
             if term or trunc:
                 obs, _ = env.reset(); h = agent.initial_state(1)
+                if cnn: cnn.reset()
     F, A = torch.stack(F), torch.tensor(A, device=args.device)
     part = (torch.arange(len(F), device=args.device) // 25) % 2; tr, te = part == 0, part == 1
-    print(f"recorded {len(F)} steps, {F.shape[1]} features; teacher action shares: "
-          + ", ".join(f"{k} {float((A == v).float().mean()):.0%}" for k, v in (("NOOP", NOOP), ("UP", UP), ("DOWN", DOWN))), flush=True)
+    print(f"recorded {len(F)} steps, {F.shape[1]} features; teacher {args.teacher}; action shares: "
+          + ", ".join(f"{a} {float((A == a).float().mean()):.0%}" for a in range(n_actions)), flush=True)
 
     head = (torch.nn.Sequential(torch.nn.Linear(F.shape[1], args.hidden), torch.nn.Tanh(), torch.nn.Linear(args.hidden, n_actions))
             if args.hidden else torch.nn.Linear(F.shape[1], n_actions)).to(args.device)
@@ -90,9 +127,9 @@ def main() -> None:
     acc_tr = float((head(F[tr]).argmax(1) == A[tr]).float().mean()); acc_te = float((head(F[te]).argmax(1) == A[te]).float().mean())
     print(f"behaviour cloning accuracy: train {acc_tr:.1%}, held-out {acc_te:.1%}", flush=True)
 
-    teacher = play(env, agent, lambda f, e: teacher_action(e), args.episodes, args.device)
-    cloned = play(env, agent, lambda f, e: int(head(f).argmax()), args.episodes, args.device)
-    print(f"teacher on RAM state: {np.mean(teacher):.1f} (episodes {teacher})", flush=True)
+    teacher = play(env, agent, lambda f, e, o: teach(e, o), args.episodes, args.device, teacher=cnn)
+    cloned = play(env, agent, lambda f, e, o: int(head(f).argmax()), args.episodes, args.device)
+    print(f"teacher playing: {np.mean(teacher):.1f} (episodes {teacher})", flush=True)
     print(f"cloned head on frozen fly readout: {np.mean(cloned):.1f} (episodes {cloned})", flush=True)
 
 
