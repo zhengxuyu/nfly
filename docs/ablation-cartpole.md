@@ -311,6 +311,42 @@ PPO with 4-frame stacking): -19 at 280k steps, +6 at 320k, +14.5 at 352k, **+19 
 25 minutes wall clock. That is the bar: a conventional policy learns Pong here in a third of
 a million steps; the fly at the same step count shows no movement.
 
+## 12. Is the Pong readout sufficient? (behaviour cloning from the CNN)
+
+**Experiment.** `scripts/bc_pong.py --readout-dim 0 --teacher runs/baseline-cnn-pong`: frozen,
+untrained `visual` network with the v9 retina, no readout bottleneck (all 1,314 descending
+neurons); the trained CNN baseline (+19 in its own env) is the teacher. It reads the raw
+210x160 screen through RLlib's own grayscale / 64x64 / uint8 / 128 - 1 preprocessing and a
+4-frame stack, so it plays inside the fly's suite env; its score there is printed as a control.
+Record 6,000 steps (30% random actions for coverage), fit a head by cross-entropy, play 3
+episodes with the head alone.
+
+Two pitfalls on the way, both visible as a bad teacher rather than a bad clone: feeding the
+suite's [0, 1] frames to a CNN trained on [-1, 1] gave a one-action teacher (-21); resizing the
+suite's 84x84 frame instead of the raw screen left it at -3.
+
+**Result.**
+
+| Head on the frozen 1,314-d readout | Fit accuracy (train / held-out) | Cloned head plays | Teacher in the same env |
+| --- | --- | --- | --- |
+| linear | 61.3% / 55.6% | **-9.7** (episodes 12, -20, -21) | 6.0 (19, 16, -17) |
+| 64-unit tanh MLP | 85.5% / 62.3% | **+8.0** (episodes 19, 20, -15) | 6.0 (19, 16, -17) |
+
+Both heads reproduce the teacher only about 60% of the time on held-out steps, yet the MLP head
+wins two of three episodes 19-20 to the CNN's 19 and 16, and the linear head wins one (+12).
+The third episode is a start state that also beats the teacher (-17). Nothing trained by RL on
+this readout ever left -20.
+
+**Conclusion.** The frozen, untrained connectome with the calibrated readout carries enough
+information to play Pong at the CNN's level: a 64-unit head fitted from 6,000 supervised
+steps does it. The failure of v7-v9 (up to 916k RL steps at -20.5) is therefore not the retina,
+the dynamics, or the readout; it is credit assignment. Pong's reward arrives 20-60 frames after
+the decisive paddle move, and the 1,314-d (linear) or 85k-parameter (MLP) head has to be found
+from that signal alone, where the CNN's convolutional inductive bias makes the same search easy.
+The natural next steps are on the RL side: initialise the head from behaviour cloning and let
+PPO continue (DAgger-style), or shape the reward with the ball-paddle distance, before touching
+the brain again.
+
 ## What is settled and what is open
 
 Settled:
@@ -320,6 +356,9 @@ Settled:
 - Three interface defects were real and are fixed: readout hidden by the resting pattern,
   fast components filtered by one step per frame, a 10x transient at every reset.
 - Collapse comes from high-dimensional or high-rate heads, not from the brain parameters.
+- Pong: the frozen, untrained network with the full-field retina and the 1,314-d readout
+  supports Pong at the CNN's level; a 64-unit head behaviour-cloned from the CNN in 6,000
+  steps scores +19 / +20 in two of three episodes (section 12).
 
 Settled by v6:
 - With the MLP critic, RL finds the head: 228 at update 190 versus the MLP's 174.
@@ -328,11 +367,11 @@ Settled by v6:
 
 Open:
 - Take-off: only about one seed in three learns CartPole at all (section 9).
-- Pong: ball y and vertical velocity do reach the descending neurons (R^2 0.65 / 0.47 with
-  temporal contrast); the calibrated projection loses them. The readout bottleneck needs a
-  target that keeps small moving objects, or no bottleneck for images.
+- Pong, RL: no run has left -20.5 (v7-v9, up to 916k steps), although the readout is
+  sufficient (section 12). Credit assignment is the open problem; behaviour-cloned
+  initialisation or reward shaping are the untried levers.
 - Take-off on CartPole is not fixed by entropy 0.01 (seeds 1, 2 stayed at 20-44) or by 64 envs
   (seed 1 stayed at 20).
 - RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
-- Everything above is CartPole; Pong will re-open the question of what the optic lobe
-  contributes beyond transmission.
+- What the optic lobe contributes beyond transmission is still unmeasured; section 12 shows
+  transmission alone is enough for Pong once a head is found.

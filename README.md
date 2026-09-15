@@ -312,6 +312,8 @@ use the `visual` sub-network (138,743 neurons, 8.4M edges).
 | Fly v8a | simple PPO | as v7 but no readout bottleneck: linear head on all 1,314 descending neurons | 717k | -20.65 | 1.53 | no collapse, no learning at twice the CNN's solving budget |
 | Fly v8c (control) | simple PPO | as v8a with a 64-unit tanh MLP policy head (diagnostic, not the model's claim) | 660k | -20.35 | 1.68 | no learning either |
 | Fly v9 | simple PPO | as v8a with the swept retina: full-field sampling, surround 4, temporal gain 8 (ball y R^2 0.86 at the descending neurons) | 916k | -20.55 | 1.16 | no learning at 2.5x the CNN's solving budget |
+| Fly, frozen + behaviour cloning | supervised (`scripts/bc_pong.py`) | untrained v9 network, linear head on the 1,314 descending neurons cloned from the CNN teacher on 6,000 steps | 6k | -9.7 | | episodes 12, -20, -21; teacher scored 6.0 (19, 16, -17) in the same env |
+| Fly, frozen + behaviour cloning | supervised (`scripts/bc_pong.py`) | untrained v9 network, 64-unit tanh MLP head cloned the same way | 6k | **+8.0** | | episodes 19, 20, -15: the frozen connectome's readout supports Pong at the CNN's level; RL has not found the head |
 
 What the CartPole rows established: the training loop is sound (MLP learns); the connectome
 transmits the full state to the descending neurons (a behaviour-cloned linear head on the
@@ -320,7 +322,9 @@ linear probes on the frozen network, stood between that and reinforcement learni
 dominated by the resting pattern, fast observation components filtered by one step per frame,
 a 10x transient at every reset, a random readout projection half made of drift, and a linear
 critic. With those fixed the fly learns CartPole to the MLP's level and beyond, though not yet
-stably; that stability, and Pong, are the open items.
+stably. On Pong the same sufficiency test passes (a head cloned from the CNN plays +19 on the
+frozen network) while every RL run stays at -20.5, so the open items are CartPole take-off
+stability and credit assignment on Pong, not the model's representation.
 
 To add a row, run one of the training commands above, read the last log line (simple trainers)
 or the last `{"iter": ...}` line (RLlib), and record the config, env steps, return and entropy.
