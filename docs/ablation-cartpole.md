@@ -292,8 +292,14 @@ Probe sweeps on Pong, ball position / ball vertical velocity (R^2) at the descen
 Dynamics settings and input gain move little; the spatial and temporal high-pass help by
 about 0.1 each; sampling density is the lever: letting both eyes see the whole frame instead of
 one hemifield each doubles the photoreceptors a small object hits. **Change:** defaults are now
-full-field sampling, surround 4, temporal gain 8. **Run v9** (these defaults, otherwise as v8a):
-in progress.
+full-field sampling, surround 4, temporal gain 8.
+
+**Run v9** (these defaults, otherwise as v8a): 916k steps, return -20.55, entropy 1.2, no
+learning. With ball y at R^2 0.86 and paddle y at 0.84 in the readout, a linear rule (move
+towards the ball) is representable, yet RL did not find it in 2.5x the CNN's budget. Next test:
+behaviour cloning of a heuristic Pong teacher on the frozen readout (`scripts/bc_pong.py`), the
+same sufficiency test that settled CartPole, to separate "the readout cannot support control"
+from "RL cannot find the head under Pong's sparse, delayed reward".
 
 **Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
 critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the

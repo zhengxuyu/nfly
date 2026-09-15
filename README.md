@@ -310,7 +310,8 @@ use the `visual` sub-network (138,743 neurons, 8.4M edges).
 | Fly v4 / v5 | RLlib APPO | fixed model, official APPO recipe; v5 with per-group lr | 25k / 5k | -21 | 0.0 | collapsed to a deterministic policy |
 | Fly v7 | simple PPO | temporal-contrast retina, 26-d readout subspace, MLP critic, 16 envs, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs | 435k | -21.0 | 1.50 | no collapse, no learning |
 | Fly v8a | simple PPO | as v7 but no readout bottleneck: linear head on all 1,314 descending neurons | 717k | -20.65 | 1.53 | no collapse, no learning at twice the CNN's solving budget |
-| Fly v8c (control) | simple PPO | as v8a with a 64-unit tanh MLP policy head (diagnostic, not the model's claim) | 660k | -20.35 | 1.68 | no learning either: the limit is the ball signal at the descending neurons, not the linear readout |
+| Fly v8c (control) | simple PPO | as v8a with a 64-unit tanh MLP policy head (diagnostic, not the model's claim) | 660k | -20.35 | 1.68 | no learning either |
+| Fly v9 | simple PPO | as v8a with the swept retina: full-field sampling, surround 4, temporal gain 8 (ball y R^2 0.86 at the descending neurons) | 916k | -20.55 | 1.16 | no learning at 2.5x the CNN's solving budget |
 
 What the CartPole rows established: the training loop is sound (MLP learns); the connectome
 transmits the full state to the descending neurons (a behaviour-cloned linear head on the
