@@ -27,9 +27,9 @@ UP, DOWN, NOOP = 2, 3, 0      # ALE Pong: RIGHT = up, LEFT = down
 class CNNTeacher:
     """The trained CNN baseline (scripts/baseline_cnn_pong.py checkpoint) as the teacher.
 
-    The baseline saw 64x64 grayscale frames in [-1, 1] stacked 4 deep; here our 84x84 frame in
-    [0, 1] is rescaled, resized to 64x64 and stacked over the last four env steps. The teacher's
-    own score is printed so a mismatch shows up as a bad teacher, not a bad clone."""
+    It reads the raw 210x160 screen and applies RLlib's own grayscale, 64x64 resize and
+    uint8 / 128 - 1 normalisation, stacked over the last four env steps. Its own score is
+    printed so a preprocessing mismatch shows up as a bad teacher, not a bad clone."""
 
     def __init__(self, checkpoint: str, device: str):
         import os
@@ -41,11 +41,10 @@ class CNNTeacher:
     def reset(self):
         self.stack = []
 
-    def __call__(self, obs_frame: np.ndarray) -> int:
-        frame = torch.as_tensor(obs_frame[0] if obs_frame.ndim == 3 else obs_frame, device=self.device).float()
-        # The suite scales pixels to [0, 1]; RLlib's NormalizedImageEnv used uint8 / 128 - 1.
-        frame = frame * (255.0 / 128.0) - 1.0
-        small = torch.nn.functional.interpolate(frame[None, None], size=(64, 64), mode="area")[0, 0]
+    def __call__(self, env) -> int:
+        from ray.rllib.env.wrappers.atari_wrappers import resize, rgb2gray
+        screen = resize(rgb2gray(env.unwrapped.ale.getScreenRGB()), height=64, width=64)
+        small = torch.as_tensor(screen, device=self.device).float() / 128.0 - 1.0
         self.stack = (self.stack + [small])[-4:]
         while len(self.stack) < 4:
             self.stack.insert(0, self.stack[0])
@@ -102,7 +101,7 @@ def main() -> None:
     n_actions = env.action_space.n
     cnn = None if args.teacher == "heuristic" else CNNTeacher(args.teacher, args.device)
     def teach(env, obs):
-        return teacher_action(env) if cnn is None else cnn(np.asarray(obs))
+        return teacher_action(env) if cnn is None else cnn(env)
 
     obs, _ = env.reset(); h = agent.initial_state(1); F, A = [], []
     if cnn: cnn.reset()
