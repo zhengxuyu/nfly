@@ -262,9 +262,16 @@ amplifiers (features of 500 in play; the first PPO update had KL 0.6 and the pol
 deterministic within ten updates); features are now clipped after the projection as well.
 
 **Run v7** (26-d readout subspace): 435k steps, return -21, entropy 1.5, no learning; stopped.
-**Runs v8a / v8b** (no bottleneck, 1,314-d heads / coarse-map 128-d bottleneck), in progress:
-they decide whether the remaining loss at the bottleneck is what stands between the fly and
-Pong, or whether the ball signal at the descending neurons (0.66 / 0.50) is itself too weak.
+**Run v8a** (no bottleneck: linear head on all 1,314 descending neurons, MLP critic): 717k
+steps, return -20.65, entropy 0.9-1.5, no learning. Twice the budget in which the CNN solved
+Pong on the same machine. Removing the bottleneck did not help, so the loss at the bottleneck
+was not what stood between the fly and Pong.
+
+**Run v8c** (as v8a with a 64-unit tanh MLP policy head, a diagnostic control that is not the
+model's claim): in progress. If it learns, the descending neurons carry enough and the linear
+readout is the limit; if it does not, the ball signal at the descending neurons (R^2 0.66 for
+position, 0.50 for vertical velocity) is itself too weak for control and the work moves
+upstream, to the retina encoding and the optic lobe.
 
 **Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
 critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the
