@@ -3,8 +3,9 @@
 MaleCNS gives every optic-lobe columnar neuron (L1, L2, Mi1, Tm1, ...) a hexagonal column
 coordinate per eye.  Photoreceptors carry no coordinate, so each one is placed at the
 synapse-weighted mean coordinate of its columnar targets.  Hex axial coordinates are
-converted to 2-D, normalised per eye, and each eye is laid over one half of the image
-(left eye = left half).  A frame is then sampled bilinearly at every photoreceptor position.
+converted to 2-D, normalised per eye, and each eye is laid over the image (over one half each
+with split=True, the whole frame by default). A frame is then sampled bilinearly at every
+photoreceptor position.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ def photoreceptor_layout(conn: Connectome) -> RetinaLayout:
     return RetinaLayout(per_pr.index.to_numpy(), side, xy)
 
 
-def eye_grid(layout: RetinaLayout, split: bool = True, mirror_left: bool = True) -> np.ndarray:
+def eye_grid(layout: RetinaLayout, split: bool = False, mirror_left: bool = True) -> np.ndarray:
     """Per-eye normalised image coordinates in [-1, 1]^2 (grid_sample convention)."""
     xy = hex_to_xy(layout.hex_xy[:, 0], layout.hex_xy[:, 1])
     uv = np.zeros_like(xy)
@@ -82,7 +83,10 @@ def eye_grid(layout: RetinaLayout, split: bool = True, mirror_left: bool = True)
 class Retina(nn.Module):
     """Samples frames at the retina positions.  encode(frames (B,H,W)) -> contrast drive (B,K)."""
 
-    def __init__(self, layout: RetinaLayout, split: bool = True, mirror_left: bool = True):
+    def __init__(self, layout: RetinaLayout, split: bool = False, mirror_left: bool = True):
+        """split=True gives each eye one half of the frame (the fly's hemifields); the default
+        lets both eyes sample the whole frame, doubling the sampling density on small objects
+        (Pong ball position at the descending neurons: R^2 0.72 split, 0.86 full-field)."""
         super().__init__()
         self.side = layout.side
         self.register_buffer("idx", torch.as_tensor(np.array(layout.idx), dtype=torch.long))

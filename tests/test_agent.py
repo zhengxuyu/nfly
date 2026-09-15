@@ -48,13 +48,15 @@ def visual_connectome(n_col=20, hex_coords=True):
 
 def test_retina_places_photoreceptors_and_splits_eyes():
     c = visual_connectome()
-    ret = build_retina(c)
+    ret = build_retina(c, split=True)
     assert ret.n_inputs == 40 and (c.neurons.iloc[ret.idx.numpy()]["cell_type"] == "R1-R6").all()
     gx = ret.grid.view(-1, 2)[:, 0]
     assert (gx[torch.as_tensor(ret.side == "L")] <= 0).all() and (gx[torch.as_tensor(ret.side == "R")] >= 0).all()
     frame = torch.zeros(1, 84, 84); frame[:, :, 42:] = 1.0
     d = ret.encode(frame)[0]
     assert d[torch.as_tensor(ret.side == "R")].mean() > 0.5 and d[torch.as_tensor(ret.side == "L")].mean() < -0.5
+    full = build_retina(c)                                             # default: both eyes see the whole frame
+    assert full.grid.view(-1, 2)[:, 0].min() < -0.9 and full.grid.view(-1, 2)[:, 0].max() > 0.9
 
 
 def test_encoder_selection_from_spaces():

@@ -276,9 +276,24 @@ and the work moves upstream, to the retina encoding and the network dynamics.
 
 ## 11. Upstream: retina and dynamics (probe sweep)
 
-A probe sweep (`runs/sweep-retina.sh`: centre-surround weight 0 / 2 / 4, temporal gain 4 / 8,
-network steps per frame 4 / 8, leak 0.5 / 0.7 / 0.9) measures ball position and vertical
-velocity at the descending neurons for each setting; results below when complete.
+Probe sweeps on Pong, ball position / ball vertical velocity (R^2) at the descending neurons:
+
+| Setting (rnn 4, alpha 0.7 unless noted) | ball y | ball dy |
+| --- | --- | --- |
+| temporal gain 4 (previous default) | 0.64 | 0.56 |
+| temporal gain 8 | 0.69 | 0.60 |
+| surround 2 / 4, temporal gain 4 | 0.72 / 0.73 | 0.61 / 0.62 |
+| surround 4, temporal gain 8 | 0.72 | 0.65 |
+| alpha 0.5 / 0.9 | 0.75 / 0.63 | 0.48 / 0.60 |
+| rnn 8, alpha 0.5 / 0.7 / 0.9 | 0.64 / 0.60 / 0.58 | 0.58 / 0.65 / 0.61 |
+| input gain 2 / 10 (surround 4, gain 8) | 0.70 / 0.73 | 0.61 / 0.63 |
+| **both eyes sampling the whole frame** (surround 4, gain 8) | **0.86** | **0.68** (ball x velocity 0.19 -> 0.65) |
+
+Dynamics settings and input gain move little; the spatial and temporal high-pass help by
+about 0.1 each; sampling density is the lever: letting both eyes see the whole frame instead of
+one hemifield each doubles the photoreceptors a small object hits. **Change:** defaults are now
+full-field sampling, surround 4, temporal gain 8. **Run v9** (these defaults, otherwise as v8a):
+in progress.
 
 **Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
 critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the

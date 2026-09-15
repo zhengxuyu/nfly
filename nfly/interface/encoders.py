@@ -82,13 +82,16 @@ def _sensory_nodes(conn: Connectome, n: int | None, seed: int) -> np.ndarray:
 class RetinaEncoder(ObservationEncoder):
     """Frames sampled at the compound eye's photoreceptor positions (MaleCNS hex columns).
 
-    With a [frame, change] observation the drive is contrast(frame) + temporal_gain * change
-    sampled at the same positions: a temporal high-pass, standing in for the transient response
-    of real photoreceptors. On Pong it raised the ball's position and vertical velocity at the
-    descending neurons from R^2 0.45 / 0.41 to 0.66 / 0.64 (temporal_gain 4)."""
+    With a [frame, change] observation the drive is contrast(frame) + surround * (frame minus
+    its local mean) + temporal_gain * change, all sampled at the same positions: a spatial and a
+    temporal high-pass, standing in for the antagonistic surround and the transient response of
+    real photoreceptors and lamina cells. Defaults come from a probe sweep on Pong (ball y /
+    vertical velocity at the descending neurons): plain contrast 0.45 / 0.41; temporal gain 4 ->
+    0.64 / 0.56; temporal gain 8 + surround 4 -> 0.72 / 0.65; plus both eyes sampling the whole
+    frame (Retina split=False) -> 0.86 / 0.68."""
 
     def __init__(self, conn: Connectome, space: gym.spaces.Box, mode: str = "photoreceptors",
-                 temporal_gain: float = 4.0, surround: float = 0.0, surround_size: int = 9, **kw):
+                 temporal_gain: float = 8.0, surround: float = 4.0, surround_size: int = 9, **kw):
         """surround: weight of a centre-surround term, frame minus its local mean over a
         surround_size x surround_size window, added to the drive. Real lamina cells (L1/L2)
         have antagonistic surrounds; this makes small objects stand out against uniform
