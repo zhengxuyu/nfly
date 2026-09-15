@@ -7,6 +7,11 @@ velocity (frame-to-frame difference), i.e. the motion signal a linear policy nee
 
     uv run scripts/probe_readout.py --suite atari --game pong --subset visual --steps 1500
     uv run scripts/probe_readout.py --suite classic --game cartpole --subset visual_small
+    uv run scripts/probe_readout.py --suite atari --game pong --layers      # also stage by stage
+
+With --layers the same regression is run on the activity of successive stages of the visual
+pathway (photoreceptor drive, lamina, medulla, lobula / T4-T5, visual projection neurons,
+descending neurons), which shows where a signal such as the ball's position is lost.
 """
 
 from __future__ import annotations
@@ -21,6 +26,16 @@ from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrat
 from nfly.suite import get_suite
 
 PONG_RAM = {"ball x": 49, "ball y": 54, "player paddle y": 51, "cpu paddle y": 50}
+
+# Successive stages of the fly visual pathway, by MaleCNS cell type / superclass.
+STAGES = [
+    ("photoreceptors R1-R8", {"cell_type": ["R1-R6", "R7p", "R7y", "R8p", "R8y", "R7d", "R8d", "R7_unclear", "R8_unclear", "R7R8_unclear"]}),
+    ("lamina L1-L5", {"cell_type": ["L1", "L2", "L3", "L4", "L5"]}),
+    ("medulla Mi/Tm", {"cell_type": ["Mi1", "Mi4", "Mi9", "Tm1", "Tm2", "Tm3", "Tm4", "Tm9", "Tm20"]}),
+    ("T4/T5 motion detectors", {"cell_type": ["T4a", "T4b", "T4c", "T4d", "T5a", "T5b", "T5c", "T5d"]}),
+    ("visual projection neurons", {"super_class": ["visual_projection"]}),
+    ("descending neurons", {"super_class": ["descending_neuron"]}),
+]
 
 
 def targets_of(env, prev: dict | None) -> tuple[dict, dict]:
@@ -50,6 +65,8 @@ def main() -> None:
     p.add_argument("--suite", default="atari")
     p.add_argument("--game", default="pong")
     p.add_argument("--steps", type=int, default=1500)
+    p.add_argument("--layers", action="store_true", help="also probe successive stages of the visual pathway")
+    p.add_argument("--max-neurons", type=int, default=3000, help="--layers: random subset size per stage")
     args = p.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
@@ -58,22 +75,39 @@ def main() -> None:
     agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device).eval()
     calibrate_on(agent, get_suite(args.suite).make(args.game, seed=args.seed + 1000))
 
+    rng = np.random.default_rng(args.seed)
+    stages = []
+    if args.layers:
+        for name, cond in STAGES:
+            idx = conn.where(**cond).numpy()
+            if len(idx) > args.max_neurons:
+                idx = np.sort(rng.choice(idx, args.max_neurons, replace=False))
+            stages.append((f"{name} ({len(idx)} of {len(conn.where(**cond))})", torch.as_tensor(idx, device=args.device)))
     obs, _ = env.reset(); h = agent.initial_state(1); prev = None
-    raw, feats, ys = [], [], []
+    raw, feats, ys, stage_acts, drives = [], [], [], [[] for _ in stages], []
     with torch.no_grad():
         for _ in range(args.steps):
             x = torch.as_tensor(np.asarray(obs), device=args.device).unsqueeze(0)
             f, h = agent.step(x, h)
             y, prev = targets_of(env, prev)
             raw.append(agent.decoder.norm(h[:, agent.decoder.idx])[0].cpu()); feats.append(f[0].cpu()); ys.append(list(y.values()))
+            if stages:
+                drives.append(agent.encoder.encode(x)[0].cpu())
+                for acts, (_, idx) in zip(stage_acts, stages):
+                    acts.append(h[0, idx].cpu())
             obs, _, term, trunc, _ = env.step(env.action_space.sample())
             if term or trunc:
                 obs, _ = env.reset(); h = agent.initial_state(1); prev = None
     names = list(y)
     Y = torch.tensor(ys)
-    for label, X, lam in ((f"all {agent.decoder.n_readout} readout neurons", torch.stack(raw), 1e-1),
-                          (f"{agent.decoder.n_features} calibrated features", torch.stack(feats), 1e-2)):
-        r2 = ridge_r2(X, Y, lam)
+    probes = [(f"all {agent.decoder.n_readout} readout neurons", torch.stack(raw), 1e-1),
+              (f"{agent.decoder.n_features} calibrated features", torch.stack(feats), 1e-2)]
+    if stages:
+        probes.insert(0, (f"photoreceptor drive ({agent.encoder.n_inputs} inputs, before the network)", torch.stack(drives), 1e-1))
+        probes[1:1] = [(label, torch.stack(acts), 1e-1) for (label, _), acts in zip(stages, stage_acts)]
+    for label, X, lam in probes:
+        X = (X - X.mean(0)) / (X.std(0) + 1e-6)
+        r2 = ridge_r2(X, Y, lam * X.shape[1] / 100)
         print(f"held-out R^2 from {label}: " + ", ".join(f"{n} {float(v):.2f}" for n, v in zip(names, r2)), flush=True)
 
 
