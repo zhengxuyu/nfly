@@ -114,7 +114,7 @@ def test_atari_suite():
     s = get_suite("atari")
     env = s.make("pong", seed=0)
     obs, _ = env.reset(seed=0)
-    assert obs.shape == (84, 84) and 0 <= obs.max() <= 1
+    assert obs.shape == (2, 84, 84) and 0 <= obs[0].max() <= 1        # [frame, change]
     agent = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
     assert play_episode(agent, env, seed=0, max_steps=5).steps == 5
     env.close()
@@ -254,4 +254,17 @@ def test_calibrate_on_env_uses_real_observations_and_motion():
     assert r2 is not None and a.decoder.n_features == 8 and a.value[0].in_features == 8
     dist, v, _ = a(torch.rand(2, 84, 84), a.initial_state(2))
     assert dist.sample().shape == (2,) and v.shape == (2,)
+    env.close()
+
+
+def test_atari_temporal_contrast_and_retina_high_pass():
+    env = get_suite("atari").make("pong", seed=0)
+    obs, _ = env.reset(seed=0)
+    assert obs.shape == (2, 84, 84) and np.all(obs[1] == 0)          # first change is zero
+    obs2, *_ = env.step(0)
+    assert np.allclose(obs2[1], obs2[0] - obs[0])
+    a = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
+    still = torch.zeros(1, 2, 84, 84); moving = still.clone(); moving[0, 1, 40:44, 40:42] = 1.0
+    d0, d1 = a.encoder.encode(still), a.encoder.encode(moving)
+    assert (d1 - d0).abs().max() > 0                                  # change reaches the photoreceptor drive
     env.close()

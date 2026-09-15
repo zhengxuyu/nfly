@@ -93,12 +93,16 @@ class Retina(nn.Module):
     def n_inputs(self) -> int:
         return int(self.idx.numel())
 
-    def encode(self, frames: torch.Tensor) -> torch.Tensor:
-        """frames (B, H, W) in [0, 1] -> (B, K) contrast in [-1, 1]."""
+    def sample(self, frames: torch.Tensor) -> torch.Tensor:
+        """frames (B, H, W) -> (B, K): the frame values at the photoreceptor positions."""
         x = frames.unsqueeze(1).float()
         grid = self.grid.expand(x.shape[0], -1, -1, -1)
         v = nn.functional.grid_sample(x, grid, mode="bilinear", align_corners=True)
-        return (v.view(x.shape[0], -1) - 0.5) * 2
+        return v.view(x.shape[0], -1)
+
+    def encode(self, frames: torch.Tensor) -> torch.Tensor:
+        """frames (B, H, W) in [0, 1] -> (B, K) contrast in [-1, 1]."""
+        return (self.sample(frames) - 0.5) * 2
 
 
 def build_retina(conn: Connectome, mode: str = "photoreceptors", **kw) -> Retina:
