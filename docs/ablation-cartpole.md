@@ -217,9 +217,33 @@ from the readout. Held-out R^2 from all 1,314 readout neurons: ball x -0.03, bal
 velocity -0.11 / -0.02, player paddle y 0.82, cpu paddle y 0.68. From the 32 calibrated
 features: worse. The descending neurons carry the paddles and not the ball: a 2x4-pixel object
 lands on one or two of 5,494 photoreceptors and is diluted away through the optic lobe. No
-trainer can learn Pong from this readout; a stage-by-stage probe (photoreceptor drive, lamina,
-medulla, T4/T5, visual projection neurons, descending neurons) is in progress to locate where
-the ball is lost.
+trainer can learn Pong from this readout.
+
+**Stage-by-stage probe** (after making the probe robust: PCA to 256 components, ridge with
+validated strength, interleaved block splits because the score digits drift through a game).
+Held-out R^2, random-policy Pong:
+
+| Stage | ball y | ball dy | player paddle y |
+| --- | --- | --- | --- |
+| photoreceptor drive (pixels sampled by the retina) | 0.33 | 0.42 | -0.09 |
+| lamina L1-L5 | 0.63 | 0.41 | 0.86 |
+| T4/T5 motion detectors | 0.61 | 0.46 | 0.86 |
+| visual projection neurons | 0.66 | 0.49 | 0.87 |
+| descending neurons (1,314) | 0.64 | 0.42 | 0.86 |
+| 32 calibrated features (regressed onto [frame, diff] PCA) | 0.35 | 0.16 | 0.76 |
+
+Ball x is not linearly decodable at any stage (it is not needed for Pong). Ball y and its
+vertical velocity travel from the lamina to the descending neurons and are lost in the last
+step, the calibrated projection: PCA targets of frames are dominated by paddles and score
+digits. No PCA-based target (frame, [frame, diff], diff only, k up to 128) or the readout's own
+PCA kept ball velocity.
+
+**Temporal contrast.** Real photoreceptors and lamina cells respond to change and adapt to
+steady light; the rate model has no adaptation. Adding the change since the previous frame to
+the photoreceptor drive (gain 4) raised, at the descending neurons, ball y to 0.65 and ball dy
+to 0.47 in the layered probe (0.66 / 0.64 in the offline test), with T4/T5 at 0.68 / 0.60.
+**Change:** the Atari suite emits [frame, change] observations and the retina adds
+temporal_gain x change to the drive.
 
 ## What is settled and what is open
 
@@ -238,7 +262,11 @@ Settled by v6:
 
 Open:
 - Take-off: only about one seed in three learns CartPole at all (section 9).
-- Pong: the ball does not reach the descending neurons (section 10).
+- Pong: ball y and vertical velocity do reach the descending neurons (R^2 0.65 / 0.47 with
+  temporal contrast); the calibrated projection loses them. The readout bottleneck needs a
+  target that keeps small moving objects, or no bottleneck for images.
+- Take-off on CartPole is not fixed by entropy 0.01 (seeds 1, 2 stayed at 20-44) or by 64 envs
+  (seed 1 stayed at 20).
 - RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
 - Everything above is CartPole; Pong will re-open the question of what the optic lobe
   contributes beyond transmission.
