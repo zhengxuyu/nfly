@@ -62,6 +62,7 @@ class ActionDecoder(nn.Module):
         super().__init__()
         self.register_buffer("idx", torch.as_tensor(readout_idx, dtype=torch.long))
         self.norm = ReadoutNorm(len(readout_idx))
+        readout_dim = min(readout_dim, len(readout_idx)) if readout_dim else None     # never wider than the readout
         self.proj = nn.Linear(len(readout_idx), readout_dim, bias=False) if readout_dim else nn.Identity()
         if readout_dim:
             nn.init.orthogonal_(self.proj.weight)          # rows orthonormal: unit-variance inputs stay unit-variance
@@ -79,17 +80,30 @@ class ActionDecoder(nn.Module):
         return self.proj(self.norm(h[:, self.idx]))
 
     def calibrate(self, h: torch.Tensor, targets: torch.Tensor | None = None, ridge: float = 0.1) -> float | None:
-        """Set the readout normalisation from a probe of states h (M, N) and, when `targets`
-        (M, T) are given, point the bottleneck at them: ridge-regress the normalised readout
-        onto the targets and install the solution (scaled to unit output variance) as the
-        projection. With observations as targets the heads then see a reconstruction of what
-        the agent observed instead of a random slice of readout activity, half of whose
-        variance is the network's own drift. Returns the fit's R^2 on the probe."""
+        """Set the readout normalisation from a probe of states h (M, N) and the bottleneck.
+
+        With `targets` (M, T): ridge-regress the normalised readout onto them and install the
+        solution (unit output variance) as the projection; with observations as targets the
+        heads see a reconstruction of what the agent observed (used for vector observations).
+        Without targets: the readout's own top-k principal subspace (used for images, where
+        PCA targets of frames are dominated by large static structures and lose small moving
+        objects such as the Pong ball). Returns the R^2 of the fit, or the variance fraction
+        kept by the subspace."""
         self.norm.calibrate(h[:, self.idx])
-        if targets is None or not isinstance(self.proj, nn.Linear):
+        if not isinstance(self.proj, nn.Linear):
             return None
         with torch.no_grad():
             x = self.norm(h[:, self.idx])
+            if targets is None:                          # no target: the readout's own principal subspace
+                k = min(self.proj.out_features, x.shape[0] - 1, x.shape[1])
+                xc = x - x.mean(0)
+                _, _, v = torch.pca_lowrank(xc, q=k, center=False)
+                proj = nn.Linear(x.shape[1], k, bias=True).to(x.device)
+                proj.weight.copy_(v.T / ((xc @ v).std(0) + 1e-6).unsqueeze(1))
+                proj.bias.copy_(-(x.mean(0) @ v) / ((xc @ v).std(0) + 1e-6))
+                self.proj = proj
+                self._rebuild_heads(k)
+                return float(((xc @ v) ** 2).sum() / (xc ** 2).sum())      # variance kept
             k = min(self.proj.out_features, targets.shape[1])
             y = (targets[:, :k] - targets[:, :k].mean(0)) / (targets[:, :k].std(0) + 1e-6)
             xc = x - x.mean(0)

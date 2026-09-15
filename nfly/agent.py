@@ -21,6 +21,10 @@ from .interface.decoders import ActionDecoder
 from .interface.encoders import ObservationEncoder
 
 
+def _is_image(space: gym.Space) -> bool:
+    return isinstance(space, gym.spaces.Box) and len(space.shape) in (2, 3) and min(space.shape[-2:]) >= 8
+
+
 def value_head(n_features: int, hidden: int = 64) -> nn.Module:
     """A small tanh MLP critic. The policy stays linear on the readout, so this changes nothing
     about how the fly acts; it only gives training a value function that can fit the task
@@ -66,8 +70,15 @@ class FlyAgent(nn.Module):
     def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
               input_gain: float = 5.0, alpha_init: float = 0.7, global_scale: float = 1.0, bias_init: float = 0.1,
               encoder: ObservationEncoder | None = None, decoder: ActionDecoder | None = None,
-              readout_idx: torch.Tensor | None = None, readout_dim: int | None = 32,
+              readout_idx: torch.Tensor | None = None, readout_dim: int | None = None,
               encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
+        """readout_dim: width of the readout bottleneck; None picks 32 for vector observations
+        (calibrated to reconstruct the observation) and 128 for images (the readout's own
+        principal subspace, which keeps small moving objects better than any frame target)."""
+        if readout_dim is None:
+            readout_dim = 128 if _is_image(obs_space) else 32
+        elif readout_dim == 0:
+            readout_dim = None                                        # explicit: no bottleneck
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
         enc = encoder or ObservationEncoder.for_space(conn, obs_space, **(encoder_kw or {}))
         dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim)
@@ -136,7 +147,8 @@ class FlyAgent(nn.Module):
             if term or trunc:
                 obs, _ = env.reset(); h = self.initial_state(1); prev = torch.as_tensor(np.asarray(obs), device=dev).float()
         states, observed, previous = torch.cat(states), torch.stack(observed), torch.stack(previous)
-        r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features, previous))
+        targets = None if _is_image(env.observation_space) else _projection_targets(observed, self.decoder.n_features, previous)
+        r2 = self.decoder.calibrate(states, targets)
         self.value = value_head(self.decoder.n_features).to(dev)
         return r2
 

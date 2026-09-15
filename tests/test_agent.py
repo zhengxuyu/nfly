@@ -191,9 +191,10 @@ def test_param_groups_scale_brain_and_heads():
 def test_readout_bottleneck_shapes():
     c = visual_connectome()
     a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
+    k = min(8, a.decoder.n_readout)                                    # never wider than the readout
     feats, _ = a.step(torch.rand(3, 84, 84), a.initial_state(3))
-    assert feats.shape == (3, 8) and a.decoder.n_features == 8 and a.value[0].in_features == 8
-    full = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=None)
+    assert feats.shape == (3, k) and a.decoder.n_features == k and a.value[0].in_features == k
+    full = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=0)
     assert full.decoder.n_features == full.decoder.n_readout
     # head lr is unscaled with the bottleneck, scaled without it
     assert a.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3)
@@ -228,7 +229,7 @@ def test_calibrated_projection_reconstructs_vector_observations():
 def test_calibrated_projection_uses_pca_for_images():
     c = visual_connectome()
     a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
-    assert a.decoder.n_features == 8 and a.decoder.proj.in_features == a.decoder.n_readout
+    assert a.decoder.n_features == min(8, a.decoder.n_readout) and a.decoder.proj.in_features == a.decoder.n_readout
 
 
 def test_ppo_lr_schedule_anneals_and_adapts():
@@ -267,4 +268,19 @@ def test_atari_temporal_contrast_and_retina_high_pass():
     still = torch.zeros(1, 2, 84, 84); moving = still.clone(); moving[0, 1, :, 42:] = 1.0     # change over the right half
     d0, d1 = a.encoder.encode(still), a.encoder.encode(moving)
     assert (d1 - d0).abs().max() > 0                                  # change reaches the photoreceptor drive
+    env.close()
+
+
+def test_image_calibration_uses_readout_subspace():
+    from nfly import load_malecns
+    from nfly.connectome import write_synthetic
+    import tempfile, pathlib
+    c = load_malecns(write_synthetic(pathlib.Path(tempfile.mkdtemp())), cache=False)
+    env = get_suite("atari").make("pong", seed=0)
+    a = FlyAgent.build(c, env.observation_space, env.action_space)
+    assert a.decoder.n_features == min(128, a.decoder.n_readout)      # image default
+    kept = a.calibrate_on_env(env, steps=60)
+    assert kept is not None and 0 < kept <= 1.0 + 1e-4                 # variance fraction kept by the subspace
+    feats, _ = a.step(torch.as_tensor(env.reset()[0]).unsqueeze(0), a.initial_state(1))
+    assert feats.shape[1] == a.decoder.n_features
     env.close()
