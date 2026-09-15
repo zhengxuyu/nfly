@@ -252,7 +252,7 @@ def test_calibrate_on_env_uses_real_observations_and_motion():
     env = get_suite("atari").make("pong", seed=0)
     a = FlyAgent.build(c, env.observation_space, env.action_space, readout_dim=8)
     r2 = a.calibrate_on_env(env, steps=48)
-    assert r2 is not None and a.decoder.n_features == 8 and a.value[0].in_features == 8
+    assert r2 is not None and 4 <= a.decoder.n_features <= 8 and a.value[0].in_features == a.decoder.n_features
     dist, v, _ = a(torch.rand(2, 84, 84), a.initial_state(2))
     assert dist.sample().shape == (2,) and v.shape == (2,)
     env.close()

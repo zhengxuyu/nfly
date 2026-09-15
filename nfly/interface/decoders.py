@@ -58,6 +58,9 @@ class ActionDecoder(nn.Module):
 
     idx: torch.Tensor    # (R,) readout node indices
 
+    variance_kept: float = 0.99      # readout-subspace calibration keeps this fraction of probe variance
+    feature_clip: float = 10.0       # features are clipped after the projection as well
+
     def __init__(self, readout_idx: torch.Tensor, readout_dim: int | None = 32):
         super().__init__()
         self.register_buffer("idx", torch.as_tensor(readout_idx, dtype=torch.long))
@@ -77,7 +80,7 @@ class ActionDecoder(nn.Module):
         return self.proj.out_features if isinstance(self.proj, nn.Linear) else self.n_readout
 
     def features(self, h: torch.Tensor) -> torch.Tensor:
-        return self.proj(self.norm(h[:, self.idx]))
+        return self.proj(self.norm(h[:, self.idx])).clamp(-self.feature_clip, self.feature_clip)
 
     def calibrate(self, h: torch.Tensor, targets: torch.Tensor | None = None, ridge: float = 0.1) -> float | None:
         """Set the readout normalisation from a probe of states h (M, N) and the bottleneck.
@@ -97,13 +100,20 @@ class ActionDecoder(nn.Module):
             if targets is None:                          # no target: the readout's own principal subspace
                 k = min(self.proj.out_features, x.shape[0] - 1, x.shape[1])
                 xc = x - x.mean(0)
-                _, _, v = torch.pca_lowrank(xc, q=k, center=False)
+                _, sv, v = torch.pca_lowrank(xc, q=k, center=False)
+                # keep only components with real variance in the probe (99% of it): whitening a
+                # near-null direction turns it into a noise amplifier in play (features of 500
+                # were seen on Pong with all 128 components whitened)
+                explained = (sv ** 2).cumsum(0) / (xc ** 2).sum()
+                k = max(4, int((explained < self.variance_kept).sum()) + 1)
+                v = v[:, :k]
+                scale = (xc @ v).std(0) + 1e-6
                 proj = nn.Linear(x.shape[1], k, bias=True).to(x.device)
-                proj.weight.copy_(v.T / ((xc @ v).std(0) + 1e-6).unsqueeze(1))
-                proj.bias.copy_(-(x.mean(0) @ v) / ((xc @ v).std(0) + 1e-6))
+                proj.weight.copy_(v.T / scale.unsqueeze(1))
+                proj.bias.copy_(-(x.mean(0) @ v) / scale)
                 self.proj = proj
                 self._rebuild_heads(k)
-                return float(((xc @ v) ** 2).sum() / (xc ** 2).sum())      # variance kept
+                return float(explained[k - 1])
             k = min(self.proj.out_features, targets.shape[1])
             y = (targets[:, :k] - targets[:, :k].mean(0)) / (targets[:, :k].std(0) + 1e-6)
             xc = x - x.mean(0)
