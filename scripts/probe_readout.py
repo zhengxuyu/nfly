@@ -50,12 +50,23 @@ def targets_of(env, prev: dict | None) -> tuple[dict, dict]:
     return {**cur, **vel}, cur
 
 
-def ridge_r2(X: torch.Tensor, Y: torch.Tensor, lam: float) -> torch.Tensor:
+def decodability(X: torch.Tensor, Y: torch.Tensor, n_components: int = 256) -> torch.Tensor:
+    """Held-out R^2 of a linear decoder of Y from X, robust to many more features than samples:
+    standardise, project to the top principal components (fit on the first half), then ridge
+    with the regularisation strength chosen on a validation split of the training half."""
+    X = (X - X.mean(0)) / (X.std(0) + 1e-6)
     n = len(X) // 2
+    if X.shape[1] > n_components:
+        _, _, v = torch.pca_lowrank(X[:n], q=n_components, center=False)
+        X = X @ v
     X1 = torch.cat([X, torch.ones(len(X), 1)], 1)
-    W = torch.linalg.solve(X1[:n].T @ X1[:n] + lam * torch.eye(X1.shape[1]), X1[:n].T @ Y[:n])
-    pred = X1[n:] @ W
-    return 1 - ((pred - Y[n:]) ** 2).sum(0) / ((Y[n:] - Y[n:].mean(0)) ** 2).sum(0)
+    tr, va = X1[: n // 2], X1[n // 2: n]
+    def fit(A, B, lam):
+        return torch.linalg.solve(A.T @ A + lam * torch.eye(A.shape[1]), A.T @ B)
+    def r2(pred, target):
+        return 1 - ((pred - target) ** 2).sum(0) / ((target - target.mean(0)) ** 2).sum(0)
+    best = max((float(r2(va @ fit(tr, Y[: n // 2], lam), Y[n // 2: n]).mean()), lam) for lam in (1e-2, 1e-1, 1, 10, 100, 1000))[1]
+    return r2(X1[n:] @ fit(X1[:n], Y[:n], best), Y[n:])
 
 
 def main() -> None:
@@ -100,14 +111,13 @@ def main() -> None:
                 obs, _ = env.reset(); h = agent.initial_state(1); prev = None
     names = list(y)
     Y = torch.tensor(ys)
-    probes = [(f"all {agent.decoder.n_readout} readout neurons", torch.stack(raw), 1e-1),
-              (f"{agent.decoder.n_features} calibrated features", torch.stack(feats), 1e-2)]
+    probes = [(f"all {agent.decoder.n_readout} readout neurons", torch.stack(raw)),
+              (f"{agent.decoder.n_features} calibrated features", torch.stack(feats))]
     if stages:
-        probes.insert(0, (f"photoreceptor drive ({agent.encoder.n_inputs} inputs, before the network)", torch.stack(drives), 1e-1))
-        probes[1:1] = [(label, torch.stack(acts), 1e-1) for (label, _), acts in zip(stages, stage_acts)]
-    for label, X, lam in probes:
-        X = (X - X.mean(0)) / (X.std(0) + 1e-6)
-        r2 = ridge_r2(X, Y, lam * X.shape[1] / 100)
+        probes.insert(0, (f"photoreceptor drive ({agent.encoder.n_inputs} inputs, before the network)", torch.stack(drives)))
+        probes[1:1] = [(label, torch.stack(acts)) for (label, _), acts in zip(stages, stage_acts)]
+    for label, X in probes:
+        r2 = decodability(X, Y)
         print(f"held-out R^2 from {label}: " + ", ".join(f"{n} {float(v):.2f}" for n, v in zip(names, r2)), flush=True)
 
 
