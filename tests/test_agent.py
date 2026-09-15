@@ -264,7 +264,7 @@ def test_atari_temporal_contrast_and_retina_high_pass():
     obs2, *_ = env.step(0)
     assert np.allclose(obs2[1], obs2[0] - obs[0])
     a = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
-    still = torch.zeros(1, 2, 84, 84); moving = still.clone(); moving[0, 1, 40:44, 40:42] = 1.0
+    still = torch.zeros(1, 2, 84, 84); moving = still.clone(); moving[0, 1, :, 42:] = 1.0     # change over the right half
     d0, d1 = a.encoder.encode(still), a.encoder.encode(moving)
     assert (d1 - d0).abs().max() > 0                                  # change reaches the photoreceptor drive
     env.close()
