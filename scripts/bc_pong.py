@@ -27,9 +27,9 @@ UP, DOWN, NOOP = 2, 3, 0      # ALE Pong: RIGHT = up, LEFT = down
 class CNNTeacher:
     """The trained CNN baseline (scripts/baseline_cnn_pong.py checkpoint) as the teacher.
 
-    The baseline saw 64x64 grayscale frames stacked 4 deep; here our 84x84 frame is resized to
-    64x64 and stacked over the last four env steps, which is close enough for the CNN to keep
-    most of its score (checked by playing it)."""
+    The baseline saw 64x64 grayscale frames in [-1, 1] stacked 4 deep; here our 84x84 frame in
+    [0, 1] is rescaled, resized to 64x64 and stacked over the last four env steps. The teacher's
+    own score is printed so a mismatch shows up as a bad teacher, not a bad clone."""
 
     def __init__(self, checkpoint: str, device: str):
         import os
@@ -43,6 +43,8 @@ class CNNTeacher:
 
     def __call__(self, obs_frame: np.ndarray) -> int:
         frame = torch.as_tensor(obs_frame[0] if obs_frame.ndim == 3 else obs_frame, device=self.device).float()
+        # The suite scales pixels to [0, 1]; RLlib's NormalizedImageEnv used uint8 / 128 - 1.
+        frame = frame * (255.0 / 128.0) - 1.0
         small = torch.nn.functional.interpolate(frame[None, None], size=(64, 64), mode="area")[0, 0]
         self.stack = (self.stack + [small])[-4:]
         while len(self.stack) < 4:
