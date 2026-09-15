@@ -284,3 +284,16 @@ def test_image_calibration_reconstructs_coarse_maps():
     feats, _ = a.step(torch.as_tensor(env.reset()[0]).unsqueeze(0), a.initial_state(1))
     assert feats.shape[1] == a.decoder.n_features
     env.close()
+
+
+def test_mlp_policy_head_is_optional_and_rebuilds():
+    c = visual_connectome()
+    space = gym.spaces.Box(-1, 1, (4,), np.float32)
+    a = FlyAgent.build(c, space, gym.spaces.Discrete(3), head_hidden=16)
+    assert isinstance(a.decoder.head, torch.nn.Sequential) and a.decoder.head[0].in_features == a.decoder.n_features
+    a.calibrate(space)                                                 # heads are rebuilt to the fitted width
+    assert a.decoder.head[0].in_features == a.decoder.n_features
+    dist, v, _ = a(torch.rand(2, 4), a.initial_state(2))
+    assert dist.sample().shape == (2,)
+    linear = FlyAgent.build(c, space, gym.spaces.Discrete(3))
+    assert isinstance(linear.decoder.head, torch.nn.Linear)

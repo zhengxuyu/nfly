@@ -126,25 +126,37 @@ class ActionDecoder(nn.Module):
 
     @staticmethod
     def for_space(conn: Connectome, space: gym.Space, readout_idx: torch.Tensor | None = None,
-                  readout_dim: int | None = 32) -> "ActionDecoder":
+                  readout_dim: int | None = 32, head_hidden: int = 0) -> "ActionDecoder":
         idx = readout_idx if readout_idx is not None else default_readout_nodes(conn)
         if isinstance(space, gym.spaces.Discrete):
-            return DiscreteDecoder(idx, int(space.n), readout_dim)
+            return DiscreteDecoder(idx, int(space.n), readout_dim, head_hidden)
         if isinstance(space, gym.spaces.Box):
             return BoxDecoder(idx, space, readout_dim)
         raise NotImplementedError(f"unsupported action space {space}")
 
 
+def policy_head(n_features: int, n_out: int, hidden: int = 0) -> nn.Module:
+    """Linear head (the default: the fly's readout neurons decide the action through one
+    linear map), or, with `hidden` > 0, a one-hidden-layer tanh MLP. The MLP is a diagnostic
+    control only: if it learns where the linear head does not, the readout carries the
+    information and linearity is the limit; it is not the model's claim."""
+    if hidden:
+        head = nn.Sequential(nn.Linear(n_features, hidden), nn.Tanh(), nn.Linear(hidden, n_out))
+        nn.init.zeros_(head[-1].weight); nn.init.zeros_(head[-1].bias)
+        return head
+    head = nn.Linear(n_features, n_out)
+    nn.init.zeros_(head.weight); nn.init.zeros_(head.bias)
+    return head
+
+
 class DiscreteDecoder(ActionDecoder):
-    def __init__(self, readout_idx, n_actions: int, readout_dim: int | None = 32):
+    def __init__(self, readout_idx, n_actions: int, readout_dim: int | None = 32, head_hidden: int = 0):
         super().__init__(readout_idx, readout_dim)
-        self.head = nn.Linear(self.n_features, n_actions)
-        nn.init.zeros_(self.head.weight); nn.init.zeros_(self.head.bias)
+        self.n_actions, self.head_hidden = n_actions, head_hidden
+        self.head = policy_head(self.n_features, n_actions, head_hidden)
 
     def _rebuild_heads(self, n_features):
-        head = nn.Linear(n_features, self.head.out_features).to(self.head.weight.device)
-        nn.init.zeros_(head.weight); nn.init.zeros_(head.bias)
-        self.head = head
+        self.head = policy_head(n_features, self.n_actions, self.head_hidden).to(self.idx.device)
 
     def dist_inputs(self, feats):
         return self.head(feats)

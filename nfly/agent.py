@@ -76,7 +76,7 @@ class FlyAgent(nn.Module):
     def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
               input_gain: float = 5.0, alpha_init: float = 0.7, global_scale: float = 1.0, bias_init: float = 0.1,
               encoder: ObservationEncoder | None = None, decoder: ActionDecoder | None = None,
-              readout_idx: torch.Tensor | None = None, readout_dim: int | None = None,
+              readout_idx: torch.Tensor | None = None, readout_dim: int | None = None, head_hidden: int = 0,
               encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
         """readout_dim: width of the readout bottleneck; None picks 32 for vector observations
         (calibrated to reconstruct the observation) and 128 for images (calibrated to reconstruct
@@ -87,7 +87,7 @@ class FlyAgent(nn.Module):
             readout_dim = None                                        # explicit: no bottleneck
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
         enc = encoder or ObservationEncoder.for_space(conn, obs_space, **(encoder_kw or {}))
-        dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim)
+        dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim, head_hidden)
         agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain)
         agent.calibrate(obs_space)
         return agent
@@ -188,7 +188,7 @@ class FlyAgent(nn.Module):
                 continue
             if name.startswith("brain."):
                 brain.append(q)
-            elif name.startswith("value.") or name.startswith("decoder.") and not name.startswith("decoder.norm."):
+            elif name.startswith("value.") or name.startswith("decoder.") and not name.startswith("decoder.norm."):   # heads incl. an MLP policy head
                 heads.append(q)
             else:
                 rest.append(q)
