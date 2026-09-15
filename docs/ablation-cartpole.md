@@ -188,6 +188,39 @@ updates with KL 0.02-0.03 cut the epochs to 1-2 by target_kl and still move the 
 enough to lose 100-200 points in ten updates. Stabilising that (smaller head steps once the
 policy is good, or lr annealing) is the next item.
 
+## 9. Seeds: does it take off every time?
+
+**Experiment.** Three seeds each of the v6 configuration (constant lr) and of v7 (v6 plus
+linear lr annealing and KL-adaptive lr scaling), 200 updates, one run at a time.
+
+| Config | seed 0 | seed 1 | seed 2 | took off |
+| --- | --- | --- | --- | --- |
+| v6, constant lr | 228 (peak) | 20 | 13 | 1 of 3 |
+| v7, lr schedule | 24 | 30 | 285 (peak) | 1 of 3 |
+
+**Conclusion.** The lr schedule is neutral (PR #6 will not be merged as a default). The real
+instability is not late oscillation but whether a run takes off at all: two thirds of the runs
+never leave random level, while the MLP learns in every seed. Seed 2 stayed flat under v6 and
+reached 285 under v7 with the same initialisation, so take-off is decided by the training
+trajectory, not by the initial network.
+
+## 10. RLlib on Pong, and what the readout carries
+
+With the interface fixes and the official RLlib APPO recipe (batch 500, target-network update
+every 2, entropy 0.01 -> 0, vf 1.0, grad clip 40, circular buffer 4 x 2), Pong v4 collapsed to
+zero entropy within 25k steps; v5, with per-group learning rates ported into the RLlib learner
+(brain x0.1, heads by fan-in), collapsed within 5k steps. APPO has no target-KL guard and
+replays every batch twice; this track is parked until the readout question below is settled.
+
+**Probe (scripts/probe_readout.py).** Random-policy Pong, ridge regression of ALE RAM quantities
+from the readout. Held-out R^2 from all 1,314 readout neurons: ball x -0.03, ball y 0.24, ball
+velocity -0.11 / -0.02, player paddle y 0.82, cpu paddle y 0.68. From the 32 calibrated
+features: worse. The descending neurons carry the paddles and not the ball: a 2x4-pixel object
+lands on one or two of 5,494 photoreceptors and is diluted away through the optic lobe. No
+trainer can learn Pong from this readout; a stage-by-stage probe (photoreceptor drive, lamina,
+medulla, T4/T5, visual projection neurons, descending neurons) is in progress to locate where
+the ball is lost.
+
 ## What is settled and what is open
 
 Settled:
@@ -204,6 +237,8 @@ Settled by v6:
   to random twice; the trainable run is steadier and higher.
 
 Open:
-- Stability: both runs oscillate by 100-200 points between updates late in training.
+- Take-off: only about one seed in three learns CartPole at all (section 9).
+- Pong: the ball does not reach the descending neurons (section 10).
+- RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
 - Everything above is CartPole; Pong will re-open the question of what the optic lobe
   contributes beyond transmission.
