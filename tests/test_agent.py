@@ -178,14 +178,18 @@ def test_mlp_reference_runs_through_simple_trainers():
 
 def test_param_groups_scale_brain_and_heads():
     c = visual_connectome()
-    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
-    rest, heads, brain = a.param_groups(1e-3, brain_scale=0.1, reference_fan_in=2)
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=0)
+    groups = a.param_groups(1e-3, brain_scale=0.1, reference_fan_in=2)
+    rest, brain = groups[0], groups[-1]
     assert brain["lr"] == pytest.approx(1e-4) and rest["lr"] == 1e-3
-    assert heads["lr"] == pytest.approx(1e-3 * 2 / a.decoder.n_features)
     names = {id(q): n for n, q in a.named_parameters()}
     assert all(names[id(q)].startswith("brain.") for q in brain["params"])
-    assert all(names[id(q)].startswith(("value.", "decoder.head", "decoder.proj")) for q in heads["params"])
-    assert sum(len(g["params"]) for g in (rest, heads, brain)) == sum(1 for q in a.parameters() if q.requires_grad)
+    head_groups = groups[1:-1]
+    for g in head_groups:                                             # each head weight scaled by its own fan-in
+        for q in g["params"]:
+            fan_in = q.shape[1] if q.dim() == 2 else 1
+            assert g["lr"] == pytest.approx(1e-3 * min(1.0, 2 / fan_in))
+    assert sum(len(g["params"]) for g in groups) == sum(1 for q in a.parameters() if q.requires_grad)
 
 
 def test_readout_bottleneck_shapes():
@@ -196,9 +200,10 @@ def test_readout_bottleneck_shapes():
     assert feats.shape == (3, k) and a.decoder.n_features == k and a.value[0].in_features == k
     full = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=0)
     assert full.decoder.n_features == full.decoder.n_readout
-    # head lr is unscaled with the bottleneck, scaled without it
-    assert a.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3)
-    assert full.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3 * min(1.0, 64 / full.decoder.n_readout))
+    # with the bottleneck every head layer has fan-in <= 64: full lr; without it the first layer is scaled
+    assert all(g["lr"] == pytest.approx(1e-3) for g in a.param_groups(1e-3)[1:-1])
+    first = [g for g in full.param_groups(1e-3)[1:-1] if any(q.dim() == 2 and q.shape[1] == full.decoder.n_readout for q in g["params"])]
+    assert first and first[0]["lr"] == pytest.approx(1e-3 * min(1.0, 64 / full.decoder.n_readout))
 
 
 def test_episodes_start_from_the_resting_state():

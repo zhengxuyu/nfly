@@ -177,23 +177,26 @@ class FlyAgent(nn.Module):
         brain      lr * brain_scale: millions of edge gains under Adam each move by about lr per
                    update, which shifts the whole network; a smaller step keeps updates in the
                    trust region.
-        heads      lr * min(1, reference_fan_in / n_features): with Adam the logit shift per
-                   update grows with the number of head inputs, so heads reading more than
-                   reference_fan_in features get a proportionally smaller rate (no scaling
-                   with the default 32-dimensional readout bottleneck).
+        heads      per weight matrix, lr * min(1, reference_fan_in / fan_in): with Adam the shift
+                   of a layer's output per update grows with its fan-in, so a layer reading 1,314
+                   readout neurons steps 20x more gently than one reading 64 features. Biases and
+                   the layers of a bottlenecked head (fan-in <= reference) keep the full lr.
         the rest   lr (encoder projection, input gain, readout normalisation)."""
-        brain, heads, rest = [], [], []
+        rest, brain, by_lr = [], [], {}
         for name, q in self.named_parameters():
             if not q.requires_grad:
                 continue
             if name.startswith("brain."):
                 brain.append(q)
-            elif name.startswith("value.") or name.startswith("decoder.") and not name.startswith("decoder.norm."):   # heads incl. an MLP policy head
-                heads.append(q)
+            elif name.startswith("value.") or name.startswith("decoder.") and not name.startswith("decoder.norm."):
+                fan_in = q.shape[1] if q.dim() == 2 else 1
+                by_lr.setdefault(lr * min(1.0, reference_fan_in / fan_in), []).append(q)
             else:
                 rest.append(q)
-        head_lr = lr * min(1.0, reference_fan_in / self.decoder.n_features)
-        return [{"params": rest, "lr": lr}, {"params": heads, "lr": head_lr}, {"params": brain, "lr": lr * brain_scale}]
+        groups = [{"params": rest, "lr": lr}]
+        groups += [{"params": ps, "lr": g_lr} for g_lr, ps in sorted(by_lr.items(), reverse=True)]
+        groups.append({"params": brain, "lr": lr * brain_scale})
+        return groups
 
     def step(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """One env step: obs (B, ...) and state h (B, N) -> readout features (B, R) and new h.
