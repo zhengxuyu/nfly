@@ -256,7 +256,12 @@ projection.
 **Pong v7** (simple PPO, 16 envs on the GPU, temporal contrast, 33-d readout subspace, MLP
 critic, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs): 94 env steps / s, 2.3x the
 RLlib CPU env runners; entropy 1.66-1.78 through the first 100 updates, no collapse; return
--20.4 at 51k steps (expected this early). Running to 1.5M steps.
+-20.4 at 51k steps; -21.0 at 310k steps with entropy 1.37 (running to 1.5M steps).
+
+**CNN baseline on the same machine** (`scripts/baseline_cnn_pong.py`, RLlib's tuned Atari
+PPO with 4-frame stacking): -19 at 280k steps, +6 at 320k, +14.5 at 352k, **+19 at 356k**,
+25 minutes wall clock. That is the bar: a conventional policy learns Pong here in a third of
+a million steps; the fly at the same step count shows no movement.
 
 ## What is settled and what is open
 

@@ -297,16 +297,18 @@ The full investigation, experiment by experiment, is in [docs/ablation-cartpole.
 
 ### Pong (ALE, max +21, random about -20.7, human about 14.6)
 
-All fly runs use the `visual` sub-network (138,743 neurons, 8.4M edges) on the shared RTX 5090
-and the pre-fix model (rnn_steps 2 or 1, LayerNorm readout); they are kept for the record and
-will be rerun with the fixed model.
+Same machine (one shared RTX 5090, 8 env runners or 16 in-process envs) for every row. Fly runs
+use the `visual` sub-network (138,743 neurons, 8.4M edges).
 
 | Model | Trainer | Config | Env steps | Return | Entropy at end | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
+| **CNN (RLlib tuned Atari PPO)** | RLlib PPO | `scripts/baseline_cnn_pong.py`: 4-frame stack, 4-conv CNN, batch 4000, 10 epochs, lr 1.5e-4 | **356k** | **+19.0** | | reached the stop criterion (>= 18) in 25 minutes; -19 at 280k, +6 at 320k, +14.5 at 352k |
 | Fly | simple A2C | rnn_steps 2, 8 envs, rollout 16, lr 3e-4, entropy 0.01 | 321k | -20.5 | 0.64 | policy collapsed to two actions within 100k steps |
 | Fly | simple PPO | rnn_steps 2, 8 envs, rollout 32, 3 epochs, entropy 0.01 | 289k | -19.8 | 0.55 | slower collapse, no score gain |
 | Fly | RLlib PPO | rnn_steps 2, 8 runners x 2 envs, batch 4096, minibatch 256 | 41k | -20.6 | 1.66 | stopped by a checkpoint-path bug (fixed) |
-| Fly | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 755k | -20.3 | 1.71 | entropy and return flat throughout; 160 env steps / s |
+| Fly | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 755k | -20.3 | 1.71 | pre-fix model; entropy and return flat throughout; 160 env steps / s |
+| Fly v4 / v5 | RLlib APPO | fixed model, official APPO recipe; v5 with per-group lr | 25k / 5k | -21 | 0.0 | collapsed to a deterministic policy |
+| Fly v7 | simple PPO | temporal-contrast retina, 33-d readout subspace, MLP critic, 16 envs, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs | 310k (running) | -21.0 | 1.37 | no collapse; no learning yet at the step count where the CNN was at +6 |
 
 What the CartPole rows established: the training loop is sound (MLP learns); the connectome
 transmits the full state to the descending neurons (a behaviour-cloned linear head on the
