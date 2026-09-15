@@ -302,3 +302,16 @@ def test_mlp_policy_head_is_optional_and_rebuilds():
     assert dist.sample().shape == (2,)
     linear = FlyAgent.build(c, space, gym.spaces.Discrete(3))
     assert isinstance(linear.decoder.head, torch.nn.Linear)
+
+
+def test_retina_surround_highlights_small_objects():
+    c = visual_connectome()
+    space = gym.spaces.Box(0, 1, (84, 84), np.float32)
+    plain = FlyAgent.build(c, space, gym.spaces.Discrete(4), encoder_kw={"surround": 0.0})
+    cs = FlyAgent.build(c, space, gym.spaces.Discrete(4), encoder_kw={"surround": 2.0})
+    uniform = torch.full((1, 84, 84), 0.5)
+    dot = uniform.clone(); dot[0, 40:44, 60:62] = 1.0                   # a small bright object on a flat background
+    d_plain = (plain.encoder.encode(dot) - plain.encoder.encode(uniform)).abs().max()
+    d_cs = (cs.encoder.encode(dot) - cs.encoder.encode(uniform)).abs().max()
+    assert d_cs >= d_plain                                              # the surround term never hides the object
+    assert torch.allclose(cs.encoder.encode(uniform), plain.encoder.encode(uniform), atol=1e-5)   # flat background unchanged

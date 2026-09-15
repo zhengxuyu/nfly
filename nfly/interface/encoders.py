@@ -88,14 +88,23 @@ class RetinaEncoder(ObservationEncoder):
     descending neurons from R^2 0.45 / 0.41 to 0.66 / 0.64 (temporal_gain 4)."""
 
     def __init__(self, conn: Connectome, space: gym.spaces.Box, mode: str = "photoreceptors",
-                 temporal_gain: float = 4.0, **kw):
+                 temporal_gain: float = 4.0, surround: float = 0.0, surround_size: int = 9, **kw):
+        """surround: weight of a centre-surround term, frame minus its local mean over a
+        surround_size x surround_size window, added to the drive. Real lamina cells (L1/L2)
+        have antagonistic surrounds; this makes small objects stand out against uniform
+        backgrounds. 0 disables it."""
         super().__init__()
-        self.space, self.temporal_gain = space, temporal_gain
+        self.space, self.temporal_gain, self.surround, self.surround_size = space, temporal_gain, surround, surround_size
         self.retina: Retina = build_retina(conn, mode=mode, **kw)
         self.register_buffer("idx", self.retina.idx.clone())
 
     def encode(self, obs: torch.Tensor) -> torch.Tensor:
-        drive = self.retina.encode(_to_gray_2d(obs, self.space))
+        frame = _to_gray_2d(obs, self.space)
+        drive = self.retina.encode(frame)
+        if self.surround:
+            local_mean = nn.functional.avg_pool2d(frame.unsqueeze(1), self.surround_size, stride=1,
+                                                 padding=self.surround_size // 2, count_include_pad=False).squeeze(1)
+            drive = drive + self.surround * self.retina.sample(frame - local_mean)
         change = _change_2d(obs)
         if change is not None:
             drive = drive + self.temporal_gain * self.retina.sample(change)

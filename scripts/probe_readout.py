@@ -83,13 +83,19 @@ def main() -> None:
     p.add_argument("--game", default="pong")
     p.add_argument("--steps", type=int, default=1500)
     p.add_argument("--layers", action="store_true", help="also probe successive stages of the visual pathway")
+    p.add_argument("--alpha", type=float, default=0.7, help="leak per network step")
+    p.add_argument("--temporal-gain", type=float, default=4.0, help="retina: weight of the change channel")
+    p.add_argument("--surround", type=float, default=0.0, help="retina: weight of the centre-surround term")
     p.add_argument("--max-neurons", type=int, default=3000, help="--layers: random subset size per stage")
     args = p.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
     conn = connectome_from_args(args)
     env = get_suite(args.suite).make(args.game, seed=args.seed)
-    agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device).eval()
+    agent = FlyAgent.build(conn, env.observation_space, env.action_space, alpha_init=args.alpha,
+                           encoder_kw={"temporal_gain": args.temporal_gain, "surround": args.surround},
+                           **agent_kwargs(args)).to(args.device).eval()
+    print(f"config: rnn_steps {args.rnn_steps} alpha {args.alpha} temporal_gain {args.temporal_gain} surround {args.surround}", flush=True)
     calibrate_on(agent, get_suite(args.suite).make(args.game, seed=args.seed + 1000))
 
     rng = np.random.default_rng(args.seed)
