@@ -479,6 +479,9 @@ Open:
   (seed 1 stayed at 20).
 - RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
 - Rerun the retina sweep, v9 and the Pong behaviour cloning with the round eye (section 14).
+- The wiring's potential advantages are unmeasured: sample efficiency, transfer, robustness to
+  input perturbations, and cost on event-driven hardware. Each needs a matched comparison
+  against the equal-parameter MLP and the CNN.
 - The encoder is fixed apart from one global gain; a learnable version (input, surround and
   temporal gains, possibly a gain per photoreceptor, geometry still fixed) is untried.
 - What the optic lobe contributes beyond transmission is still unmeasured; section 12 shows

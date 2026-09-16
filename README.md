@@ -199,6 +199,12 @@ yet found the head that supervision finds in 6,000 steps.
 - Motor-neuron readout on the whole CNS, so the ventral nerve cord supplies the nonlinearity
   between descending and motor neurons and the head stays linear.
 - A classification recipe alongside the Gym one.
+- Test the potential advantages of real wiring, none of which is measured yet: sample
+  efficiency (env steps to a score, fly vs an equal-parameter MLP and the CNN, from the same
+  start); transfer (train on one game, measure on another, or CartPole to Pong); robustness
+  (noise, occlusion and contrast changes at test time); and cost on event-driven or
+  neuromorphic hardware, where a sparse 8.4M-edge network is not memory-bound the way it is
+  on a GPU.
 
 ## Contributing
 
