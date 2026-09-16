@@ -451,6 +451,38 @@ now the default; it is a deliberate distortion of the eye's field of view onto t
 documented in docs/design.md. The 5,494 photoreceptors occupy 1,633 distinct positions (the
 R1-R8 of one ommatidium share a column), unchanged by the warp.
 
+## 15. DAgger on the frozen fly: +13.4
+
+**Experiment.** `scripts/dagger_pong.py` with the frame-filling eye and the 64-unit MLP head:
+round 0 records 12,000 steps of the CNN teacher (30% random actions), every later round
+records 12,000 steps of the student's own greedy play with the teacher's action as the label,
+and the head is refitted on the aggregate (3,000 Adam steps). Greedy evaluation on 5 fixed
+starts after each round. Brain, encoder and readout calibration frozen throughout.
+
+| Round | Labelled steps | Fit accuracy | Greedy return (5 starts) |
+| --- | --- | --- | --- |
+| 0 (teacher only) | 12k | 79.4% | -3.4 (-20, 20, -17, -20, 20) |
+| 1 | 24k | 81.2% | -1.6 |
+| 2 | 36k | 81.7% | 9.2 (7, 20, -8, 7, 20) |
+| 3 | 48k | 80.3% | -3.8 |
+| 4 | 60k | 81.1% | 13.0 (17, 20, -9, 17, 20) |
+| 5 | 72k | 80.6% | 12.4 |
+| 6 | 84k | 81.0% | 13.2 |
+| 7 | 96k | 81.0% | **13.4** (18, 20, -9, 18, 20) |
+
+**Result.** From round 4 on, four of the five starts end at +17 to +20 and one start is lost
+every time; the mean settles at +13. Pong is deterministic given the start, so a greedy head
+either falls into a winning rally or does not, and the losing start needs its own labelled
+states. One-pass cloning on 6,000 steps (section 12, +8.0 with the old eye, -15 with the new
+one) was limited by exactly this: no labels on the student's own mistakes.
+
+**Meaning.** The frozen wiring plus one readout plays Pong near the human reference (14.6).
+Every RL attempt from the same or a weaker start stayed flat or eroded (sections 13 and 14),
+so the gap between +13 and -16 is what the policy-gradient signal fails to deliver on this
+representation, not what the representation lacks. Next: more DAgger rounds seeded from this
+head for the losing start, the linear head through the same procedure (the model's claim), and
+then PPO from the DAgger head with a KL guard and a dense shaping reward.
+
 ## What is settled and what is open
 
 Settled:

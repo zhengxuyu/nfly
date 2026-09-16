@@ -185,10 +185,11 @@ Recorded as they are, including negative results; full tables and throughput num
 | Task | Conventional model | Fly, reinforcement learning | Fly, frozen + supervised head |
 | --- | --- | --- | --- |
 | CartPole-v1 (max 500) | MLP, simple PPO: 174 at 100k steps | linear head, simple PPO: peak 228 at 97k steps, oscillating; about one seed in three takes off | linear head cloned from a heuristic: 500 / 500 |
-| Pong (max +21) | CNN, RLlib PPO: +19 at 356k steps; 8.5M-parameter MLP on pixels: -20.4 at 330k steps | -20.5 after up to 916k steps (v7-v9); from a cloned MLP head: -14 to -16 after 200k steps | MLP head cloned from the CNN: +8.0 (episodes 19, 20, -15); linear head -9.7 |
+| Pong (max +21) | CNN, RLlib PPO: +19 at 356k steps; 8.5M-parameter MLP on pixels: -20.4 at 330k steps | -20.5 after up to 916k steps (v7-v9); from a cloned MLP head: -16.5 after 307k steps | DAgger with the CNN as teacher, 64-unit MLP head: **+13.4** (four of five starts at +18 / +20); cloned in one pass: +8.0 |
 
-The connectome transmits what both tasks need to the descending neurons; on Pong, RL has not
-yet found the head that supervision finds in 6,000 steps.
+The connectome transmits what both tasks need to the descending neurons; on Pong, supervision
+finds a head that plays close to the human reference (14.6) on the frozen wiring, while RL has
+not found one.
 
 ## Roadmap
 
