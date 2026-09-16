@@ -76,7 +76,7 @@
     <div class="note" id="retinaNote">left eye | right eye; orange = depolarising current, blue = hyperpolarising (centre-surround and temporal contrast included)</div>
   </section>
   <section class="panel brain">
-    <h2>MaleCNS v1.0 brain: activity relative to rest (z-score per neuron)</h2>
+    <h2>Neurons at their MaleCNS v1.0 soma positions, coloured by activity relative to rest (z-score per neuron)</h2>
     <div class="view"><canvas id="brain"></canvas><div class="hud" id="hud">loading atlas...</div></div>
     <div class="controls">
       <button id="btnRotate" class="on">Auto-rotate</button>
@@ -180,7 +180,7 @@
     canvas.addEventListener('wheel', e => { e.preventDefault(); brain.dist = Math.min(radius * 8, Math.max(radius * 0.4, brain.dist * (1 + Math.sign(e.deltaY) * 0.08))); }, { passive: false });
     $('psize').oninput = e => { mat.size = +e.target.value; };
     $('stageLegend').innerHTML = a.stages.map((s, i) => `<span><i style="background:${a.colors[i]}"></i>${s} (${a.counts[i].toLocaleString()})</span>`).join('');
-    $('hud').innerHTML = `<b>${n.toLocaleString()}</b> of the neurons drawn at their MaleCNS soma positions`;
+    $('hud').innerHTML = `<b>${n.toLocaleString()}</b> neurons at their MaleCNS soma positions (our rendering of the release's coordinates; neurons without a soma are placed at their partners)`;
     requestAnimationFrame(renderBrain);
   }
 
