@@ -75,11 +75,15 @@ class BrainAtlas:
     stage: np.ndarray        # (M,) int8 into STAGES
     retina_xy: np.ndarray    # (K, 2) float32 photoreceptor sampling positions in the frame, [-1, 1]
     retina_eye: np.ndarray   # (K,) uint8 0 = left, 1 = right
+    body: np.ndarray         # (M,) int64 MaleCNS body ids
+    type_index: np.ndarray   # (M,) int32 into `types`
+    types: list[str]         # cell type names of the sample
 
     def to_dict(self) -> dict:
         return {"n": int(len(self.index)), "xyz": _b64(self.xyz), "stage": _b64(self.stage),
                 "stages": STAGES, "colors": STAGE_COLORS, "counts": np.bincount(self.stage, minlength=len(STAGES)).tolist(),
-                "retina_xy": _b64(self.retina_xy), "retina_eye": _b64(self.retina_eye)}
+                "retina_xy": _b64(self.retina_xy), "retina_eye": _b64(self.retina_eye),
+                "body": self.body.tolist(), "type_index": _b64(self.type_index), "types": self.types}
 
 
 def build_atlas(conn: Connectome, encoder, max_points: int = 30000, seed: int = 0,
@@ -98,7 +102,10 @@ def build_atlas(conn: Connectome, encoder, max_points: int = 30000, seed: int = 
         rest = rng.choice(rest, budget, replace=False)
     index = np.sort(np.concatenate([placed[keep_all], rest]))
     retina_xy, retina_eye = _retina_layout(encoder)
-    return BrainAtlas(index, xyz[index], stage[index], retina_xy, retina_eye)
+    cell_types = conn.neurons["cell_type"].fillna("").astype(str).to_numpy()[index]
+    types, type_index = np.unique(np.where(cell_types == "", "(untyped)", cell_types), return_inverse=True)
+    return BrainAtlas(index, xyz[index], stage[index], retina_xy, retina_eye,
+                      conn.root_ids[index].astype(np.int64), type_index.astype(np.int32), types.tolist())
 
 
 def _retina_layout(encoder) -> tuple[np.ndarray, np.ndarray]:
@@ -148,9 +155,10 @@ class BrainActivity:
     cloud: np.ndarray        # (M,) uint8, 128 = resting
     stages: list[list[float]]  # [sub-step][stage] mean |z|
     retina: np.ndarray       # (K,) uint8, 128 = no current
+    top_types: list[list]    # [[cell type, mean |z|, n drawn], ...] most responsive types this frame
 
     def to_dict(self) -> dict:
-        return {"cloud": _b64(self.cloud), "stages": self.stages, "retina": _b64(self.retina)}
+        return {"cloud": _b64(self.cloud), "stages": self.stages, "retina": _b64(self.retina), "top_types": self.top_types}
 
 
 def summarise(states: list[torch.Tensor], drive: torch.Tensor, atlas: BrainAtlas, scale: ActivityScale) -> BrainActivity:
@@ -164,9 +172,21 @@ def summarise(states: list[torch.Tensor], drive: torch.Tensor, atlas: BrainAtlas
         sums = torch.zeros(n_stages, device=z.device).index_add_(0, stage, z[index].abs())
         counts = torch.bincount(stage, minlength=n_stages).clamp_min(1)
         per_step.append((sums / counts).tolist())
-    cloud = _quantise(scale.z(states[-1][0])[index], Z_CLIP)
+    z_last = scale.z(states[-1][0])[index]
+    cloud = _quantise(z_last, Z_CLIP)
     retina = _quantise(drive, scale.drive_scale)
-    return BrainActivity(cloud, per_step, retina)
+    return BrainActivity(cloud, per_step, retina, top_cell_types(z_last.abs(), atlas))
+
+
+def top_cell_types(abs_z: torch.Tensor, atlas: BrainAtlas, k: int = 12, min_count: int = 5) -> list[list]:
+    """Cell types with the highest mean |z| among the drawn neurons (at least min_count drawn)."""
+    ti = torch.as_tensor(atlas.type_index, device=abs_z.device, dtype=torch.long)
+    n_types = len(atlas.types)
+    sums = torch.zeros(n_types, device=abs_z.device).index_add_(0, ti, abs_z)
+    counts = torch.bincount(ti, minlength=n_types)
+    mean = torch.where(counts >= min_count, sums / counts.clamp_min(1), torch.zeros_like(sums))
+    top = torch.topk(mean, min(k, n_types))
+    return [[atlas.types[int(i)], round(float(v), 3), int(counts[int(i)])] for v, i in zip(top.values, top.indices) if v > 0]
 
 
 def _quantise(x: torch.Tensor, full_scale: float) -> np.ndarray:

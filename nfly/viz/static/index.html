@@ -51,6 +51,13 @@
   .status { color: var(--dim); }
   .status.err { color: #ff7b72; }
   .note { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .picked { margin-top: 8px; font-size: 13px; }
+  .picked b { color: var(--acc); font-weight: normal; }
+  #trace { width: 100%; height: 70px; display: block; background: #12151b; border-radius: 4px; margin-top: 6px; }
+  .cmp { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: start; }
+  #frameB { width: 120px; image-rendering: pixelated; background: #000; border-radius: 4px; }
+  #compare .probs .row { grid-template-columns: 70px 1fr 40px; font-size: 12px; }
+  #topTypes { max-height: 230px; overflow: auto; }
 </style>
 </head>
 <body>
@@ -73,6 +80,8 @@
       <span class="note">drag to orbit, wheel to zoom</span>
     </div>
     <div class="legend" id="stageLegend"></div>
+    <div class="picked" id="picked"><span class="note">click a neuron to follow it</span></div>
+    <canvas id="trace" width="600" height="70" hidden></canvas>
   </section>
   <section class="panel">
     <h2>Observation</h2>
@@ -92,11 +101,19 @@
     <h2 style="margin-top:14px">Compound eyes: photoreceptor input current</h2>
     <canvas id="retina" width="336" height="210"></canvas>
     <div class="note" id="retinaNote">left eye | right eye; orange = depolarising current, blue = hyperpolarising (centre-surround and temporal contrast included)</div>
+    <div id="compare" hidden>
+      <h2 style="margin-top:14px">Compare: <span id="compareName"></span></h2>
+      <div class="cmp"><canvas id="frameB" width="160" height="210"></canvas>
+        <div><div class="probs" id="probsB"></div>
+          <div class="stats" style="grid-template-columns: 1fr 1fr"><div class="stat"><div class="k">episode return</div><div class="v" id="sRetB">0</div></div><div class="stat"><div class="k">action</div><div class="v" id="sActB">-</div></div></div></div></div>
+    </div>
   </section>
   <aside class="panel">
     <h2>Signal propagation within one frame (mean |z| per stage)</h2>
     <div class="stages" id="stages"></div>
     <div class="note" id="substep">network sub-step - / -</div>
+    <h2 style="margin-top:14px">Most responsive cell types this frame (mean |z|)</h2>
+    <div id="topTypes"><table><thead><tr><th>cell type</th><th>mean |z|</th><th>drawn</th></tr></thead><tbody id="topTypesBody"></tbody></table></div>
     <h2 style="margin-top:14px">Action probabilities</h2>
     <div class="probs" id="probs"></div>
     <h2 style="margin-top:14px">Action timeline (last 256 steps)</h2>
@@ -112,7 +129,8 @@
   const $ = id => document.getElementById(id);
   const palette = ['#ffb454', '#59c2ff', '#aad94c', '#f07178', '#d2a6ff', '#95e6cb', '#f29e74', '#e6b450', '#73b8ff', '#ff8f40',
                    '#c2d94c', '#ffee99', '#7fd962', '#f28779', '#dfbfff', '#5ccfe6', '#ffcc66', '#bae67e', '#ff3333', '#a37acc'];
-  const state = { names: [], history: [], paused: false, fps: 15, atlas: null, anatomyMode: false, rotate: true };
+  const state = { names: [], history: [], paused: false, fps: 15, atlas: null, anatomyMode: false, rotate: true, clouds: [], picked: -1, compare: null };
+  const TRACE = 256;
   const frame = $('frame'), fctx = frame.getContext('2d');
   const retina = $('retina'), rctx = retina.getContext('2d');
   const tl = $('timeline'), tctx = tl.getContext('2d');
@@ -187,9 +205,9 @@
     paintCloud(null);
     loadOfficial().catch(e => console.warn('official anatomy not loaded', e));
     let drag = null;
-    canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; state.rotate = false; $('btnRotate').classList.remove('on'); });
+    canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }; state.rotate = false; $('btnRotate').classList.remove('on'); });
     window.addEventListener('pointermove', e => { if (!drag) return; brain.theta += (e.clientX - drag.x) * 0.006; brain.phi = Math.min(3.0, Math.max(0.15, brain.phi - (e.clientY - drag.y) * 0.006)); drag = { x: e.clientX, y: e.clientY }; });
-    window.addEventListener('pointerup', () => { drag = null; });
+    window.addEventListener('pointerup', e => { if (drag && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 4) pickNeuron(e); drag = null; });
     canvas.addEventListener('wheel', e => { e.preventDefault(); brain.dist = Math.min(radius * 8, Math.max(radius * 0.4, brain.dist * (1 + Math.sign(e.deltaY) * 0.08))); }, { passive: false });
     $('psize').oninput = e => { mat.size = +e.target.value; };
     buildStageLegend(a);
@@ -257,6 +275,67 @@
     $('hud').innerHTML = `<b>${state.atlas.n.toLocaleString()}</b> neurons at their MaleCNS soma positions` + (brain.hudMeshes ? ` | ${brain.hudMeshes}` : '') + (brain.hudSkel ? ` | ${brain.hudSkel}` : '');
     applyStageVisibility();
     paintCloud(state.lastCloud);
+  }
+
+  // ---- picking: nearest drawn neuron to the click in screen space ---------------------------
+  function pickNeuron(e) {
+    const a = state.atlas, canvas = brain.renderer.domElement, rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top, v = new THREE.Vector3();
+    let best = -1, bestD = 12 * 12;
+    for (let i = 0; i < a.n; i++) {
+      const st = a.stage[i]; if (!brain.stageOn[st] || !brain.stagePoints[st].pts.visible) continue;
+      const p = brain.stagePoints[st].pos, k = brain.slot[i];
+      v.set(p[3 * k], p[3 * k + 1], p[3 * k + 2]).project(brain.camera);
+      if (v.z > 1) continue;
+      const sx = (v.x + 1) / 2 * rect.width, sy = (1 - v.y) / 2 * rect.height, d = (sx - mx) ** 2 + (sy - my) ** 2;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    state.picked = best;
+    showPicked();
+  }
+
+  function showPicked() {
+    const i = state.picked, a = state.atlas, el = $('picked'), tr = $('trace');
+    if (i < 0) { el.innerHTML = '<span class="note">click a neuron to follow it</span>'; tr.hidden = true; return; }
+    const last = state.clouds.length ? (state.clouds[state.clouds.length - 1][i] - 128) / 127 * 4 : 0;
+    el.innerHTML = `body <b>${a.body[i]}</b> | type <b>${a.types[a.type_index[i]]}</b> | stage <b style="color:${a.colors[a.stage[i]]}">${a.stages[a.stage[i]]}</b> | z now <b>${last.toFixed(2)}</b> | <a href="https://neuprint.janelia.org/?dataset=male-cns%3Av1.0&bodyid=${a.body[i]}" target="_blank" style="color:var(--dim)">neuPrint</a> <button class="chip" id="unpick">x</button>`;
+    $('unpick').onclick = () => { state.picked = -1; showPicked(); };
+    tr.hidden = false; drawTrace();
+  }
+
+  function drawTrace() {
+    const i = state.picked; if (i < 0) return;
+    const c = $('trace'), ctx = c.getContext('2d'), w = c.width = c.clientWidth || 600, h = c.height;
+    ctx.fillStyle = '#12151b'; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#2a2f3a'; ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+    const cw = w / TRACE, n = state.clouds.length;
+    ctx.strokeStyle = '#ffb454'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let k = 0; k < n; k++) {
+      const z = (state.clouds[k][i] - 128) / 127;                         // -1..1 = -4..4 z
+      const x = (TRACE - n + k) * cw, y = h / 2 - z * (h / 2 - 4);
+      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#8b93a7'; ctx.font = '11px system-ui'; ctx.fillText('+4', 3, 11); ctx.fillText('-4', 3, h - 3); ctx.fillText(`last ${TRACE} steps, z-score`, w - 130, 11);
+  }
+
+  function showTopTypes(rows) {
+    const tb = $('topTypesBody'); if (!rows) return;
+    tb.innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td>${r[1].toFixed(2)}</td><td>${r[2]}</td></tr>`).join('');
+  }
+
+  // ---- compare mode: the second policy's frame, probabilities and return ---------------------
+  const imgB = new Image();
+  function buildCompare(name) {
+    $('compare').hidden = false; $('compareName').textContent = name;
+    $('probsB').innerHTML = state.names.map((n, i) => `<div class="row" id="pb${i}"><span class="name">${n}</span><div class="bar"><i style="background:${palette[i % palette.length]}"></i></div><span class="val">0.00</span></div>`).join('');
+  }
+  function drawCompare(b) {
+    if (!b) return;
+    const fb = $('frameB'); imgB.onload = () => { if (fb.width !== imgB.width) { fb.width = imgB.width; fb.height = imgB.height; } fb.getContext('2d').drawImage(imgB, 0, 0); };
+    imgB.src = 'data:image/jpeg;base64,' + b.frame_jpeg_b64;
+    (b.probs || []).forEach((p, i) => { const r = $('pb' + i); if (!r) return; r.querySelector('i').style.width = (p * 100) + '%'; r.querySelector('.val').textContent = p.toFixed(2); r.classList.toggle('chosen', i === b.action); });
+    $('sRetB').textContent = b.episode_return.toFixed(1); $('sActB').textContent = b.action_name;
   }
 
   function activityRGB(v, s, dim) {
@@ -356,9 +435,14 @@
     drawProbs(e.probs, e.action);
     if (e.brain) {
       state.lastRetina = b64(e.brain.retina, Uint8Array);
-      paintCloud(b64(e.brain.cloud, Uint8Array));
+      const cloud = b64(e.brain.cloud, Uint8Array);
+      state.clouds.push(cloud); if (state.clouds.length > TRACE) state.clouds.shift();
+      paintCloud(cloud);
       animateStages(e.brain.stages);
+      showTopTypes(e.brain.top_types);
+      if (state.picked >= 0) showPicked();
     }
+    drawCompare(e.compare);
     state.history.push({ step: e.step, action: e.action, reward: e.reward }); if (state.history.length > 512) state.history.shift();
     drawTimeline(); pushLog(e);
     $('sStep').textContent = e.step; $('sEp').textContent = e.episode;
@@ -399,6 +483,7 @@
     $('meta').textContent = `${s.suite}/${s.game}  policy=${s.policy}${s.subset ? ' subset=' + s.subset : ''}${s.checkpoint ? ' ckpt=' + s.checkpoint : ''}`;
     $('fps').value = s.fps; $('fpsv').textContent = s.fps; $('btnPause').textContent = s.paused ? 'Resume' : 'Pause';
     buildProbs(); drawTimeline();
+    if (s.compare_checkpoint) buildCompare(s.compare_checkpoint);
     await loadAtlas();
     const es = new EventSource('/api/stream');
     es.onmessage = m => { const e = JSON.parse(m.data); if (e.error) { setStatus('backend error: ' + e.error.split('\n').slice(-2).join(' '), true); return; } if (e.brain) state.lastCloud = b64(e.brain.cloud, Uint8Array); onEvent(e); };

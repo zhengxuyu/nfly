@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import time
 import urllib.request
@@ -104,6 +105,32 @@ def test_anatomy_and_brain_stream(fly_server):
     cloud = np.frombuffer(base64.b64decode(brain["cloud"]), np.uint8)
     assert len(cloud) == atlas["n"] and len(brain["stages"]) == 2 and len(brain["stages"][0]) == len(atlas["stages"])
     assert all(v >= 0 for v in brain["stages"][-1]) and ev["probs"] is not None
+    assert len(atlas["body"]) == atlas["n"] and "DN0" in atlas["types"]
+    assert brain["top_types"] and all(len(r) == 3 and r[2] >= 5 for r in brain["top_types"])
+    assert ev["compare"] is None
+
+
+def test_compare_mode(tmp_path):
+    from nfly.connectome.synthetic import write_synthetic
+    from nfly.viz import build_session
+    from nfly.rl.simple.common import save_checkpoint
+    data = write_synthetic(tmp_path)
+    cfg = SessionConfig(suite="classic", game="cartpole", data_dir=str(data), subset="all", rnn_steps=1, fps=200, max_points=50, anatomy=False)
+    first = build_session(cfg)
+    save_checkpoint(first.policy, tmp_path / "b.pt")
+    srv = VizServer(build_session(dataclasses.replace(cfg, compare_checkpoint=str(tmp_path / "b.pt"))), port=0).start()
+    try:
+        state = _wait_for_steps(srv.url)
+        assert state["compare_checkpoint"].endswith("b.pt")
+        with urllib.request.urlopen(srv.url + "/api/stream", timeout=5) as r:
+            line = r.readline()
+            while not line.startswith(b"data:"):
+                line = r.readline()
+            ev = json.loads(line[5:])
+        b = ev["compare"]
+        assert b["action_name"] in ("a0", "a1") and len(b["frame_jpeg_b64"]) > 100 and len(b["probs"]) == 2
+    finally:
+        srv.stop()
 
 
 def test_official_assets_endpoints(tmp_path):

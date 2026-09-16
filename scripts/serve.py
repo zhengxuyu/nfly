@@ -21,6 +21,7 @@ def main() -> None:
     p.add_argument("--game", default="pong")
     p.add_argument("--policy", default="fly", choices=["fly", "random"])
     p.add_argument("--checkpoint")
+    p.add_argument("--compare", dest="compare_checkpoint", help="a second checkpoint played side by side (same build args)")
     p.add_argument("--greedy", action="store_true")
     p.add_argument("--fps", type=float, default=15.0)
     p.add_argument("--host", default="127.0.0.1")

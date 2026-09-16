@@ -90,3 +90,12 @@ choose more). When present, the session serves them at `/api/anatomy/meshes` and
 `/api/anatomy/skeletons` (skeletons pruned to about 400 nodes, keeping root, tips and branch
 points), and the page draws the shells translucent and the skeletons as lines coloured by the
 neuron's activity, hiding the soma points of neurons that have a skeleton.
+
+On the page, every stage in the legend is a toggle for its somata and skeletons; clicking a
+neuron shows its MaleCNS body id, cell type and stage with a link to neuPrint and a trace of
+its z-score over the last 256 steps (the atlas carries `body`, `type_index` and `types`);
+the "most responsive cell types" table lists the cell types with the highest mean |z| among
+the drawn neurons for the current frame (`brain.top_types`). `--compare <checkpoint>` (or
+`--compare untrained`) plays a second agent with the same build in its own copy of the env,
+one step per step, and streams its frame, action, probabilities and return as `compare` on
+every event, shown under the eyes.
