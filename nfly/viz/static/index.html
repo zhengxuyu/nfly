@@ -473,6 +473,7 @@
     if (!a.n) { $('hud').textContent = 'no brain in this session (random policy, or --no-anatomy)'; $('substep').textContent = ''; return; }
     a.xyz = b64(a.xyz, Float32Array); a.stage = b64(a.stage, Uint8Array);
     a.retina_xy = b64(a.retina_xy, Float32Array); a.retina_eye = b64(a.retina_eye, Uint8Array); a.n_retina = a.retina_eye.length;
+    a.type_index = b64(a.type_index, Int32Array);
     state.atlas = a;
     buildStages(a); initBrain(a); drawRetina(null);
   }
