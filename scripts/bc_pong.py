@@ -83,6 +83,35 @@ def play(env, agent, policy, episodes: int, device: str, max_steps: int = 6000, 
     return rets
 
 
+def fit_head(head: torch.nn.Module, F: torch.Tensor, A: torch.Tensor, steps: int = 1500) -> None:
+    opt = torch.optim.Adam(head.parameters(), 3e-3, weight_decay=1e-3)
+    for _ in range(steps):
+        loss = torch.nn.functional.cross_entropy(head(F), A); opt.zero_grad(); loss.backward(); opt.step()
+
+
+def mean_entropy(head: torch.nn.Module, F: torch.Tensor) -> float:
+    with torch.no_grad():
+        return float(torch.distributions.Categorical(logits=head(F)).entropy().mean())
+
+
+def temper_head(head: torch.nn.Module, F: torch.Tensor, target: float) -> float:
+    """Scale the output layer so the sampled policy has `target` mean entropy on F (argmax
+    unchanged). Cross-entropy fitting leaves logits so large that one PPO step has KL in the
+    hundreds and the policy collapses to deterministic; RL needs a policy it can still move."""
+    last = head[-1] if isinstance(head, torch.nn.Sequential) else head
+    lo, hi = 1e-3, 1e3
+    for _ in range(60):
+        scale = (lo * hi) ** 0.5
+        with torch.no_grad():
+            last.weight.mul_(scale); last.bias.mul_(scale)
+            ent = mean_entropy(head, F)
+            last.weight.div_(scale); last.bias.div_(scale)
+        lo, hi = (lo, scale) if ent < target else (scale, hi)
+    with torch.no_grad():
+        last.weight.mul_(scale); last.bias.mul_(scale)
+    return scale
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     add_connectome_args(p, subset="visual")
@@ -90,6 +119,7 @@ def main() -> None:
     p.add_argument("--steps", type=int, default=6000, help="teacher steps to record")
     p.add_argument("--noise", type=float, default=0.3, help="teacher exploration: fraction of random actions")
     p.add_argument("--out", help="save the agent with the cloned head here (start RL from it with train_rl.py --init)")
+    p.add_argument("--entropy-target", type=float, default=1.0, help="rescale the fitted logits to this mean policy entropy (nats) so RL can move the head")
     p.add_argument("--episodes", type=int, default=3)
     p.add_argument("--teacher", default="heuristic", help="'heuristic' (RAM rule) or path to a baseline_cnn_pong checkpoint")
     args = p.parse_args()
@@ -122,16 +152,19 @@ def main() -> None:
           + ", ".join(f"{a} {float((A == a).float().mean()):.0%}" for a in range(n_actions)), flush=True)
 
     head = agent.decoder.head                                   # linear, or tanh MLP with --head-hidden
-    opt = torch.optim.Adam(head.parameters(), 3e-3, weight_decay=1e-3)
-    for _ in range(1500):
-        loss = torch.nn.functional.cross_entropy(head(F[tr]), A[tr]); opt.zero_grad(); loss.backward(); opt.step()
+    fit_head(head, F[tr], A[tr])
     acc_tr = float((head(F[tr]).argmax(1) == A[tr]).float().mean()); acc_te = float((head(F[te]).argmax(1) == A[te]).float().mean())
     print(f"behaviour cloning accuracy: train {acc_tr:.1%}, held-out {acc_te:.1%}", flush=True)
+    ent_fit = mean_entropy(head, F[te])
+    scale = temper_head(head, F[te], args.entropy_target)
+    print(f"policy entropy {ent_fit:.3f} -> {mean_entropy(head, F[te]):.3f} nats (logits x {scale:.3g})", flush=True)
 
     teacher = play(env, agent, lambda f, e, o: teach(e, o), args.episodes, args.device, teacher=cnn)
     cloned = play(env, agent, lambda f, e, o: int(head(f).argmax()), args.episodes, args.device)
+    sampled = play(env, agent, lambda f, e, o: int(torch.distributions.Categorical(logits=head(f)).sample()), args.episodes, args.device)
     print(f"teacher playing: {np.mean(teacher):.1f} (episodes {teacher})", flush=True)
     print(f"cloned head on frozen fly readout: {np.mean(cloned):.1f} (episodes {cloned})", flush=True)
+    print(f"cloned head, sampled actions (RL's starting policy): {np.mean(sampled):.1f} (episodes {sampled})", flush=True)
     if args.out:
         save_checkpoint(agent, args.out, teacher=args.teacher, cloned_return=float(np.mean(cloned)))
         print(f"saved {args.out}", flush=True)
