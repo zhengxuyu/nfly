@@ -211,6 +211,7 @@
     canvas.addEventListener('wheel', e => { e.preventDefault(); brain.dist = Math.min(radius * 8, Math.max(radius * 0.4, brain.dist * (1 + Math.sign(e.deltaY) * 0.08))); }, { passive: false });
     $('psize').oninput = e => { mat.size = +e.target.value; };
     buildStageLegend(a);
+    window.nfly = { brain, state };                                   // for debugging in the console
     $('hud').innerHTML = `<b>${n.toLocaleString()}</b> neurons at their MaleCNS soma positions`;
     requestAnimationFrame(renderBrain);
   }
@@ -281,6 +282,7 @@
   function pickNeuron(e) {
     const a = state.atlas, canvas = brain.renderer.domElement, rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top, v = new THREE.Vector3();
+    placeCamera();
     let best = -1, bestD = 12 * 12;
     for (let i = 0; i < a.n; i++) {
       const st = a.stage[i]; if (!brain.stageOn[st] || !brain.stagePoints[st].pts.visible) continue;
@@ -290,7 +292,6 @@
       const sx = (v.x + 1) / 2 * rect.width, sy = (1 - v.y) / 2 * rect.height, d = (sx - mx) ** 2 + (sy - my) ** 2;
       if (d < bestD) { bestD = d; best = i; }
     }
-    console.log('[nfly] pick at', mx.toFixed(0), my.toFixed(0), 'best', best, 'd', Math.sqrt(bestD).toFixed(1));
     state.picked = best;
     showPicked();
   }
@@ -374,14 +375,20 @@
     for (const sp of brain.stagePoints) sp.pts.geometry.attributes.color.needsUpdate = true;
   }
 
-  function renderBrain() {
+  function placeCamera() {
+    // also called by pickNeuron: a background tab gets no animation frames, so the camera may be stale
     const b = brain, canvas = b.renderer.domElement;
     const w = canvas.clientWidth, h = canvas.clientHeight;
-    if (canvas.width !== w * b.renderer.getPixelRatio() || canvas.height !== h * b.renderer.getPixelRatio()) { b.renderer.setSize(w, h, false); b.camera.aspect = w / h; b.camera.updateProjectionMatrix(); }
-    if (state.rotate) b.theta += 0.004;
+    if (w && h && (canvas.width !== w * b.renderer.getPixelRatio() || canvas.height !== h * b.renderer.getPixelRatio())) { b.renderer.setSize(w, h, false); b.camera.aspect = w / h; b.camera.updateProjectionMatrix(); }
     b.camera.position.set(b.dist * Math.sin(b.phi) * Math.sin(b.theta), b.dist * Math.cos(b.phi), b.dist * Math.sin(b.phi) * Math.cos(b.theta));
     b.camera.lookAt(0, 0, 0);
-    b.renderer.render(b.scene, b.camera);
+    b.camera.updateMatrixWorld();
+  }
+
+  function renderBrain() {
+    if (state.rotate) brain.theta += 0.004;
+    placeCamera();
+    brain.renderer.render(brain.scene, brain.camera);
     requestAnimationFrame(renderBrain);
   }
 
