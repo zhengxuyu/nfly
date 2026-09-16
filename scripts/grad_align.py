@@ -78,7 +78,7 @@ def gae(V, R, D, boot, gamma=0.99, lam=0.95):
 
 
 def flat_grad(loss, params):
-    grads = torch.autograd.grad(loss, params, retain_graph=False, allow_unused=True)
+    grads = torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
     return torch.cat([(g if g is not None else torch.zeros_like(p)).reshape(-1) for g, p in zip(grads, params)])
 
 
