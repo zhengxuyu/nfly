@@ -172,7 +172,9 @@ higher than a conventional network. Its 8.4M-edge sparse product costs 4x the ar
 by reinforcement learning neither the fly nor that MLP has learned Pong from pixels, where a CNN
 reaches +19 in 356k steps. Whether the wiring buys sample efficiency, transfer or robustness is
 untested. The claim is a platform for asking those questions on real wiring, not a better
-controller.
+controller. It is, however, a first attempt in a direction worth taking: an embodied agent
+whose controller is a real nervous system, starting with the fly's; the same interface would
+take a larger brain as connectomes of larger brains arrive.
 
 ## Benchmarks
 
