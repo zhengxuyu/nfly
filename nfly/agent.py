@@ -64,19 +64,27 @@ class FlyAgent(nn.Module):
     (R^2 0.8-0.93) and a linear probe imitates the policy at 88%."""
 
     def __init__(self, brain: ConnectomeRNN, encoder: ObservationEncoder, decoder: ActionDecoder,
-                 rnn_steps: int = 4, input_gain: float = 5.0):
+                 rnn_steps: int = 4, input_gain: float = 5.0, share_trunk: bool = False):
         super().__init__()
         self.brain, self.encoder, self.decoder = brain, encoder, decoder
         self.rnn_steps = rnn_steps
         self.input_gain = nn.Parameter(torch.tensor(float(input_gain)))
-        self.value = value_head(decoder.n_features)
+        self.share_trunk = share_trunk          # critic on the policy head's hidden layer, so the value loss trains it too
+        self.value = self._new_value_head()
         self.register_buffer("h_rest", torch.zeros(brain.n))    # resting state; episodes start here
+
+    def _new_value_head(self) -> nn.Module:
+        return value_head(self.decoder.trunk_dim if self.share_trunk else self.decoder.n_features)
+
+    def _value_input(self, feats: torch.Tensor) -> torch.Tensor:
+        return self.decoder.trunk(feats) if self.share_trunk else feats
 
     @classmethod
     def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
               input_gain: float = 5.0, alpha_init: float = 0.7, global_scale: float = 1.0, bias_init: float = 0.1,
               encoder: ObservationEncoder | None = None, decoder: ActionDecoder | None = None,
               readout_idx: torch.Tensor | None = None, readout_dim: int | None = None, head_hidden: int = 0,
+              share_trunk: bool = False,
               encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
         """readout_dim: width of the readout bottleneck; None picks 32 for vector observations
         (calibrated to reconstruct the observation) and 128 for images (calibrated to reconstruct
@@ -88,7 +96,7 @@ class FlyAgent(nn.Module):
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
         enc = encoder or ObservationEncoder.for_space(conn, obs_space, **(encoder_kw or {}))
         dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim, head_hidden)
-        agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain)
+        agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain, share_trunk=share_trunk)
         agent.calibrate(obs_space)
         return agent
 
@@ -129,7 +137,7 @@ class FlyAgent(nn.Module):
             observed.append(obs)
         states, observed = torch.cat(states), torch.cat(observed)
         r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features))
-        self.value = value_head(self.decoder.n_features).to(dev)
+        self.value = self._new_value_head().to(dev)
         return r2
 
     @torch.no_grad()
@@ -154,7 +162,7 @@ class FlyAgent(nn.Module):
                 obs, _ = env.reset(); h = self.initial_state(1); prev = torch.as_tensor(np.asarray(obs), device=dev).float()
         states, observed, previous = torch.cat(states), torch.stack(observed), torch.stack(previous)
         r2 = self.decoder.calibrate(states, _projection_targets(observed, self.decoder.n_features, previous))
-        self.value = value_head(self.decoder.n_features).to(dev)
+        self.value = self._new_value_head().to(dev)
         return r2
 
     @property
@@ -223,7 +231,7 @@ class FlyAgent(nn.Module):
     def forward(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None):
         """Returns (action distribution, value (B,), new h)."""
         feats, h = self.step(obs, h, weights)
-        return self.decoder.distribution(feats), self.value(feats).squeeze(-1), h
+        return self.decoder.distribution(feats), self.value(self._value_input(feats)).squeeze(-1), h
 
     def act(self, obs, h, greedy: bool = False):
         """Convenience for evaluation: returns (env action, new h)."""

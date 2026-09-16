@@ -360,3 +360,14 @@ def test_trace_matches_step():
     assert len(states) == 3 and torch.equal(states[-1], h2)
     action, h3, dist, states2 = a.act_traced(obs, h, greedy=True)
     assert torch.equal(h3, h2) and dist.probs.shape[-1] == env.action_space.n
+
+
+def test_shared_trunk_value_loss_trains_the_policy_hidden_layer():
+    c = visual_connectome()
+    env = get_suite("classic").make("cartpole")
+    a = FlyAgent.build(c, env.observation_space, env.action_space, head_hidden=16, share_trunk=True)
+    obs = torch.as_tensor(env.reset(seed=0)[0]).float().unsqueeze(0)
+    _, value, _ = a(obs, a.initial_state(1))
+    value.sum().backward()
+    assert a.decoder.head[0].weight.grad is not None and a.decoder.head[0].weight.grad.abs().sum() > 0
+    assert a.decoder.head[-1].weight.grad is None                     # the logits layer is the policy's alone

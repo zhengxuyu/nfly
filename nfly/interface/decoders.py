@@ -166,6 +166,15 @@ class DiscreteDecoder(ActionDecoder):
     def _rebuild_heads(self, n_features):
         self.head = policy_head(n_features, self.n_actions, self.head_hidden).to(self.idx.device)
 
+    @property
+    def trunk_dim(self) -> int:
+        return self.head_hidden or self.n_features
+
+    def trunk(self, feats):
+        """The hidden layer of an MLP head (or the features themselves for a linear head): what a
+        critic can share with the policy so the value loss also shapes what the policy reads."""
+        return self.head[:-1](feats) if self.head_hidden else feats
+
     def dist_inputs(self, feats):
         return self.head(feats)
 
