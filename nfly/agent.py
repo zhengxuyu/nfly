@@ -224,6 +224,8 @@ class FlyAgent(nn.Module):
                 continue
             if name.startswith("brain."):
                 brain.append(q)
+            elif name.startswith("value.") and self.critic == "pixels":
+                rest.append(q)                        # a conventional CNN critic trains at the full rate
             elif name.startswith("value.") or name.startswith("decoder.") and not name.startswith("decoder.norm."):
                 fan_in = q.shape[1] if q.dim() == 2 else 1
                 by_lr.setdefault(lr * min(1.0, reference_fan_in / fan_in), []).append(q)
