@@ -106,3 +106,10 @@ def save_checkpoint(agent, path: str | Path, **extra) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     torch.save({"agent": agent.state_dict(), **extra}, tmp)
     os.replace(tmp, path)
+
+
+def load_checkpoint(agent, path: str | Path) -> dict:
+    """Restore the agent's state from `save_checkpoint` output; returns the extra fields."""
+    payload = torch.load(path, map_location=next(agent.parameters()).device, weights_only=False)
+    agent.load_state_dict(payload.pop("agent"))
+    return payload

@@ -317,3 +317,16 @@ def test_retina_surround_highlights_small_objects():
     d_cs = (cs.encoder.encode(dot) - cs.encoder.encode(uniform)).abs().max()
     assert d_cs >= d_plain                                              # the surround term never hides the object
     assert torch.allclose(cs.encoder.encode(uniform), plain.encoder.encode(uniform), atol=1e-5)   # flat background unchanged
+
+
+def test_checkpoint_roundtrip(tmp_path):
+    from nfly.rl.simple.common import load_checkpoint, save_checkpoint
+    env = get_suite("classic").make("cartpole")
+    a = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
+    with torch.no_grad():
+        a.decoder.head.weight.fill_(0.5)
+    save_checkpoint(a, tmp_path / "a.pt", note="cloned")
+    b = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
+    extra = load_checkpoint(b, tmp_path / "a.pt")
+    assert extra == {"note": "cloned"}
+    assert torch.equal(b.decoder.head.weight, a.decoder.head.weight)

@@ -14,6 +14,7 @@ import torch
 
 from nfly import FlyAgent
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrate_on, connectome_from_args
+from nfly.rl.simple.common import load_checkpoint
 from nfly.suite import get_suite, play_episode
 
 
@@ -37,7 +38,7 @@ def main() -> None:
     agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device)
     calibrate_on(agent, get_suite(args.suite).make(args.game, seed=args.seed + 1000))
     if args.checkpoint:
-        agent.load_state_dict(torch.load(args.checkpoint, map_location=args.device)["agent"])
+        load_checkpoint(agent, args.checkpoint)
     agent.eval()
     print(agent.summary())
     for ep in range(args.episodes):

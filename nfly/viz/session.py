@@ -12,6 +12,7 @@ import torch
 
 from ..agent import FlyAgent
 from ..connectome import load_malecns, select_subset
+from ..rl.simple.common import load_checkpoint
 from ..suite import get_suite
 
 
@@ -79,6 +80,6 @@ def build_session(cfg: SessionConfig) -> Session:
         agent = FlyAgent.build(conn, env.observation_space, env.action_space, rnn_steps=cfg.rnn_steps).to(cfg.device)
         agent.calibrate_on_env(get_suite(cfg.suite).make(cfg.game, seed=cfg.seed + 1000))
         if cfg.checkpoint:
-            agent.load_state_dict(torch.load(cfg.checkpoint, map_location=cfg.device)["agent"])
+            load_checkpoint(agent, cfg.checkpoint)
         policy = agent.eval()
     return Session(cfg, env, policy, action_names_of(env))

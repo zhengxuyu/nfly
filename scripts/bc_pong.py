@@ -19,6 +19,7 @@ import torch
 
 from nfly import FlyAgent
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrate_on, connectome_from_args
+from nfly.rl.simple.common import save_checkpoint
 from nfly.suite import get_suite
 
 UP, DOWN, NOOP = 2, 3, 0      # ALE Pong: RIGHT = up, LEFT = down
@@ -88,7 +89,7 @@ def main() -> None:
     add_agent_args(p)
     p.add_argument("--steps", type=int, default=6000, help="teacher steps to record")
     p.add_argument("--noise", type=float, default=0.3, help="teacher exploration: fraction of random actions")
-    p.add_argument("--hidden", type=int, default=0, help="0 = linear head; else tanh MLP width")
+    p.add_argument("--out", help="save the agent with the cloned head here (start RL from it with train_rl.py --init)")
     p.add_argument("--episodes", type=int, default=3)
     p.add_argument("--teacher", default="heuristic", help="'heuristic' (RAM rule) or path to a baseline_cnn_pong checkpoint")
     args = p.parse_args()
@@ -120,8 +121,7 @@ def main() -> None:
     print(f"recorded {len(F)} steps, {F.shape[1]} features; teacher {args.teacher}; action shares: "
           + ", ".join(f"{a} {float((A == a).float().mean()):.0%}" for a in range(n_actions)), flush=True)
 
-    head = (torch.nn.Sequential(torch.nn.Linear(F.shape[1], args.hidden), torch.nn.Tanh(), torch.nn.Linear(args.hidden, n_actions))
-            if args.hidden else torch.nn.Linear(F.shape[1], n_actions)).to(args.device)
+    head = agent.decoder.head                                   # linear, or tanh MLP with --head-hidden
     opt = torch.optim.Adam(head.parameters(), 3e-3, weight_decay=1e-3)
     for _ in range(1500):
         loss = torch.nn.functional.cross_entropy(head(F[tr]), A[tr]); opt.zero_grad(); loss.backward(); opt.step()
@@ -132,6 +132,9 @@ def main() -> None:
     cloned = play(env, agent, lambda f, e, o: int(head(f).argmax()), args.episodes, args.device)
     print(f"teacher playing: {np.mean(teacher):.1f} (episodes {teacher})", flush=True)
     print(f"cloned head on frozen fly readout: {np.mean(cloned):.1f} (episodes {cloned})", flush=True)
+    if args.out:
+        save_checkpoint(agent, args.out, teacher=args.teacher, cloned_return=float(np.mean(cloned)))
+        print(f"saved {args.out}", flush=True)
 
 
 if __name__ == "__main__":

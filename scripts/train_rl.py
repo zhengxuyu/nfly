@@ -14,6 +14,7 @@ import torch
 from nfly import FlyAgent
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, apply_freezes, calibrate_on, connectome_from_args
 from nfly.rl import A2CConfig, PPOConfig, train_a2c, train_ppo
+from nfly.rl.simple.common import load_checkpoint
 from nfly.suite import get_suite
 
 TRAINERS = {"a2c": (A2CConfig, train_a2c), "ppo": (PPOConfig, train_ppo)}
@@ -37,6 +38,7 @@ def main() -> None:
     p.add_argument("--set", action="append", default=[], metavar="FIELD=VALUE",
                    help="any trainer config field, e.g. --set gamma=0.99 --set lam=0.95 --set clip=0.1 --set epochs=4 (JSON values)")
     p.add_argument("--out", help="checkpoint path (default runs/<algo>-<suite>-<game>.pt)")
+    p.add_argument("--init", help="start from the agent state in this checkpoint (e.g. a behaviour-cloned head from scripts/bc_pong.py)")
     args = p.parse_args()
     torch.manual_seed(args.seed)
 
@@ -44,6 +46,9 @@ def main() -> None:
     venv = get_suite(args.suite).make_vector(args.game, args.envs, seed=args.seed)
     agent = FlyAgent.build(conn, venv.single_observation_space, venv.single_action_space, **agent_kwargs(args)).to(args.device)
     calibrate_on(agent, get_suite(args.suite).make(args.game, seed=args.seed))
+    if args.init:
+        load_checkpoint(agent, args.init)
+        print(f"agent state loaded from {args.init}")
     agent = apply_freezes(agent, args)
     print(agent.summary(), "| trainable parameters:", f"{sum(q.numel() for q in agent.parameters() if q.requires_grad):,}")
     config_cls, train = TRAINERS[args.algo]
