@@ -168,7 +168,8 @@ New:
 
 Not new, measured honestly: at equal parameter count the fly is not cheaper and does not score
 higher than a conventional network. Its 8.4M-edge sparse product costs 4x the arithmetic of an
-8.5M-parameter MLP and 35 to 57x the CPU time per env step (the product is memory-bound), and
+8.5M-parameter MLP, 35 to 57x the CPU time and about 100x the GPU time and energy per env step
+(the product is memory-bound), and
 by reinforcement learning neither the fly nor that MLP has learned Pong from pixels, where a CNN
 reaches +19 in 356k steps. Whether the wiring buys sample efficiency, transfer or robustness is
 untested. The claim is a platform for asking those questions on real wiring, not a better

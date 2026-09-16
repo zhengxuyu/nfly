@@ -77,11 +77,19 @@ and entropy.
 | fly, `visual` sub-network | 8,847,598 | 33.6M | 147.6 | 526.7 |
 | MLP (600, 64) on the flattened frame | 8,506,719 | 8.5M | 4.2 | 9.2 |
 
-Same parameter count, 4x the arithmetic, 35 to 57x the time: the fly's cost is a sparse
-gather and scatter over 8.4M edges four times per frame, which is bound by memory bandwidth,
-while the MLP is two dense matrix products. In training on the GPU the same gap shows as 44
-versus 148 env steps per second. GPU joules per env step are measured by the same script
-when the card has room (it needs about 2 GB free).
+On the RTX 5090 (same batch and unroll; nvidia-smi power sampled during each loop with the
+idle draw of 117 W subtracted; two other jobs were on the card, so the joules are indicative):
+
+| Model | Rollout ms / env step | Replay (fwd + bwd) ms / env step | Rollout J / env step | Replay J / env step |
+| --- | --- | --- | --- | --- |
+| fly, `visual` sub-network | 0.877 | 2.381 | 0.098 | 0.684 |
+| MLP (600, 64) | 0.007 | 0.026 | 0.0022 | 0.0064 |
+
+Same parameter count, 4x the arithmetic, 35 to 57x the CPU time and about 100x the GPU time
+and 45 to 100x the GPU energy per env step: the fly's cost is a sparse gather and scatter over
+8.4M edges four times per frame, which is bound by memory bandwidth, while the MLP is two
+dense matrix products. In training on the GPU the same gap shows as 44 versus 148 env steps
+per second (the environment and the trainer take the rest).
 
 The equal-parameter MLP trained through the same simple PPO (lr 2.5e-4, otherwise the v9
 settings) stays at -20.4 after 330k steps with entropy 1.5: on raw pixels an MLP has no
