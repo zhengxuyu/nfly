@@ -376,6 +376,25 @@ features saturated at the clip, and the linear head's logits went with them.
 per-neuron `shift` and `log_gain` in standardised units, both zero after calibration; a step
 of 1e-3 is now 1e-3 of a spread. Old checkpoints do not load (different state keys).
 
+**After the fix**, the same four-update diagnostic (linear cloned head, v9 settings):
+
+| Trainable | KL at update 1 | Entropy after 4 updates |
+| --- | --- | --- |
+| brain frozen | 0.001 | 1.09 |
+| brain lr x 0.01 (1e-5) | 10.6 | 0.000 |
+| brain lr x 0.001 (1e-6) | 0.34 | 0.75 (epochs early-stopped) |
+| brain lr x 0.0001 (1e-7) | 0.003 | 1.11 |
+
+The normalisation no longer blows up, but the brain does at any learning rate above about
+1e-7, four orders of magnitude below the head's. The reason is in the calibrated statistics:
+99.6% of the descending neurons have a spread at the `min_std` floor of 1e-4 against a resting
+level of about 0.1 (median mean / spread 1,069). The observation-driven part of a descending
+neuron's activity is below one thousandth of its resting activity, so a brain step that moves
+that activity by 0.1% moves the feature by a full spread, and 1% saturates it. Input gain 5
+to 200 leaves the statistics unchanged to four digits: photoreceptors are inhibitory onto
+lamina neurons resting at 0.1, so beyond a little light they are silenced and the signal
+amplitude is capped by the resting level, then decays through the layers.
+
 **Consequence for the earlier rows.** Every RL run since v2 had these parameters drifting at
 lr 1e-3 under a zero-initialised head, where the drift is invisible in KL but still moves the
 features the head is trying to read. That is a candidate cause for the CartPole take-off
