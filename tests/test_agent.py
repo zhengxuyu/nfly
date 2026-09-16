@@ -48,13 +48,15 @@ def visual_connectome(n_col=20, hex_coords=True):
 
 def test_retina_places_photoreceptors_and_splits_eyes():
     c = visual_connectome()
-    ret = build_retina(c)
+    ret = build_retina(c, split=True)
     assert ret.n_inputs == 40 and (c.neurons.iloc[ret.idx.numpy()]["cell_type"] == "R1-R6").all()
     gx = ret.grid.view(-1, 2)[:, 0]
     assert (gx[torch.as_tensor(ret.side == "L")] <= 0).all() and (gx[torch.as_tensor(ret.side == "R")] >= 0).all()
     frame = torch.zeros(1, 84, 84); frame[:, :, 42:] = 1.0
     d = ret.encode(frame)[0]
     assert d[torch.as_tensor(ret.side == "R")].mean() > 0.5 and d[torch.as_tensor(ret.side == "L")].mean() < -0.5
+    full = build_retina(c)                                             # default: both eyes see the whole frame
+    assert full.grid.view(-1, 2)[:, 0].min() < -0.9 and full.grid.view(-1, 2)[:, 0].max() > 0.9
 
 
 def test_encoder_selection_from_spaces():
@@ -114,7 +116,7 @@ def test_atari_suite():
     s = get_suite("atari")
     env = s.make("pong", seed=0)
     obs, _ = env.reset(seed=0)
-    assert obs.shape == (84, 84) and 0 <= obs.max() <= 1
+    assert obs.shape == (2, 84, 84) and 0 <= obs[0].max() <= 1        # [frame, change]
     agent = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
     assert play_episode(agent, env, seed=0, max_steps=5).steps == 5
     env.close()
@@ -178,26 +180,32 @@ def test_mlp_reference_runs_through_simple_trainers():
 
 def test_param_groups_scale_brain_and_heads():
     c = visual_connectome()
-    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
-    rest, heads, brain = a.param_groups(1e-3, brain_scale=0.1, reference_fan_in=2)
+    a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=0)
+    groups = a.param_groups(1e-3, brain_scale=0.1, reference_fan_in=2)
+    rest, brain = groups[0], groups[-1]
     assert brain["lr"] == pytest.approx(1e-4) and rest["lr"] == 1e-3
-    assert heads["lr"] == pytest.approx(1e-3 * 2 / a.decoder.n_features)
     names = {id(q): n for n, q in a.named_parameters()}
     assert all(names[id(q)].startswith("brain.") for q in brain["params"])
-    assert all(names[id(q)].startswith(("value.", "decoder.head", "decoder.proj")) for q in heads["params"])
-    assert sum(len(g["params"]) for g in (rest, heads, brain)) == sum(1 for q in a.parameters() if q.requires_grad)
+    head_groups = groups[1:-1]
+    for g in head_groups:                                             # each head weight scaled by its own fan-in
+        for q in g["params"]:
+            fan_in = q.shape[1] if q.dim() == 2 else 1
+            assert g["lr"] == pytest.approx(1e-3 * min(1.0, 2 / fan_in))
+    assert sum(len(g["params"]) for g in groups) == sum(1 for q in a.parameters() if q.requires_grad)
 
 
 def test_readout_bottleneck_shapes():
     c = visual_connectome()
     a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
+    k = min(8, a.decoder.n_readout)                                    # never wider than the readout
     feats, _ = a.step(torch.rand(3, 84, 84), a.initial_state(3))
-    assert feats.shape == (3, 8) and a.decoder.n_features == 8 and a.value[0].in_features == 8
-    full = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=None)
+    assert feats.shape == (3, k) and a.decoder.n_features == k and a.value[0].in_features == k
+    full = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=0)
     assert full.decoder.n_features == full.decoder.n_readout
-    # head lr is unscaled with the bottleneck, scaled without it
-    assert a.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3)
-    assert full.param_groups(1e-3)[1]["lr"] == pytest.approx(1e-3 * min(1.0, 64 / full.decoder.n_readout))
+    # with the bottleneck every head layer has fan-in <= 64: full lr; without it the first layer is scaled
+    assert all(g["lr"] == pytest.approx(1e-3) for g in a.param_groups(1e-3)[1:-1])
+    first = [g for g in full.param_groups(1e-3)[1:-1] if any(q.dim() == 2 and q.shape[1] == full.decoder.n_readout for q in g["params"])]
+    assert first and first[0]["lr"] == pytest.approx(1e-3 * min(1.0, 64 / full.decoder.n_readout))
 
 
 def test_episodes_start_from_the_resting_state():
@@ -228,4 +236,97 @@ def test_calibrated_projection_reconstructs_vector_observations():
 def test_calibrated_projection_uses_pca_for_images():
     c = visual_connectome()
     a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4), readout_dim=8)
-    assert a.decoder.n_features == 8 and a.decoder.proj.in_features == a.decoder.n_readout
+    assert a.decoder.n_features == min(8, a.decoder.n_readout) and a.decoder.proj.in_features == a.decoder.n_readout
+
+
+def test_ppo_lr_schedule_anneals_and_adapts():
+    from nfly.rl import PPOConfig, train_ppo
+    from nfly.rl.simple.reference import MLPReference
+    lines = []
+    venv = get_suite("classic").make_vector("cartpole", 2)
+    agent = MLPReference(venv.single_observation_space, venv.single_action_space)
+    train_ppo(agent, venv, PPOConfig(rollout=8, updates=4, minibatch_envs=2, log_every=1, anneal_lr=True, adaptive_lr=True), log=lambda m: lines.append(m))
+    lrs = [float(l.split("lr")[1].split()[0]) for l in lines]
+    assert lrs[0] == 1.0 and lrs[-1] < lrs[0] and all(0.1 <= v <= 1.0 for v in lrs)
+    venv.close()
+
+
+def test_calibrate_on_env_uses_real_observations_and_motion():
+    from nfly import load_malecns
+    from nfly.connectome import write_synthetic
+    import tempfile, pathlib
+    c = load_malecns(write_synthetic(pathlib.Path(tempfile.mkdtemp())), cache=False)
+    env = get_suite("atari").make("pong", seed=0)
+    a = FlyAgent.build(c, env.observation_space, env.action_space, readout_dim=8)
+    r2 = a.calibrate_on_env(env, steps=48)
+    assert r2 is not None and a.decoder.n_features == min(8, a.decoder.n_readout) and a.value[0].in_features == a.decoder.n_features
+    dist, v, _ = a(torch.rand(2, 84, 84), a.initial_state(2))
+    assert dist.sample().shape == (2,) and v.shape == (2,)
+    env.close()
+
+
+def test_atari_temporal_contrast_and_retina_high_pass():
+    env = get_suite("atari").make("pong", seed=0)
+    obs, _ = env.reset(seed=0)
+    assert obs.shape == (2, 84, 84) and np.all(obs[1] == 0)          # first change is zero
+    obs2, *_ = env.step(0)
+    assert np.allclose(obs2[1], obs2[0] - obs[0])
+    a = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
+    still = torch.zeros(1, 2, 84, 84); moving = still.clone(); moving[0, 1, :, 42:] = 1.0     # change over the right half
+    d0, d1 = a.encoder.encode(still), a.encoder.encode(moving)
+    assert (d1 - d0).abs().max() > 0                                  # change reaches the photoreceptor drive
+    env.close()
+
+
+def test_image_calibration_reconstructs_coarse_maps():
+    from nfly import load_malecns
+    from nfly.connectome import write_synthetic
+    import tempfile, pathlib
+    c = load_malecns(write_synthetic(pathlib.Path(tempfile.mkdtemp())), cache=False)
+    env = get_suite("atari").make("pong", seed=0)
+    a = FlyAgent.build(c, env.observation_space, env.action_space)
+    assert a.decoder.n_features == min(128, a.decoder.n_readout)      # image default
+    r2 = a.calibrate_on_env(env, steps=60)
+    assert r2 is not None and a.decoder.n_features == min(128, a.decoder.n_readout)
+    feats, _ = a.step(torch.as_tensor(env.reset()[0]).unsqueeze(0), a.initial_state(1))
+    assert feats.shape[1] == a.decoder.n_features
+    env.close()
+
+
+def test_mlp_policy_head_is_optional_and_rebuilds():
+    c = visual_connectome()
+    space = gym.spaces.Box(-1, 1, (4,), np.float32)
+    a = FlyAgent.build(c, space, gym.spaces.Discrete(3), head_hidden=16)
+    assert isinstance(a.decoder.head, torch.nn.Sequential) and a.decoder.head[0].in_features == a.decoder.n_features
+    a.calibrate(space)                                                 # heads are rebuilt to the fitted width
+    assert a.decoder.head[0].in_features == a.decoder.n_features
+    dist, v, _ = a(torch.rand(2, 4), a.initial_state(2))
+    assert dist.sample().shape == (2,)
+    linear = FlyAgent.build(c, space, gym.spaces.Discrete(3))
+    assert isinstance(linear.decoder.head, torch.nn.Linear)
+
+
+def test_retina_surround_highlights_small_objects():
+    c = visual_connectome()
+    space = gym.spaces.Box(0, 1, (84, 84), np.float32)
+    plain = FlyAgent.build(c, space, gym.spaces.Discrete(4), encoder_kw={"surround": 0.0})
+    cs = FlyAgent.build(c, space, gym.spaces.Discrete(4), encoder_kw={"surround": 2.0})
+    uniform = torch.full((1, 84, 84), 0.5)
+    dot = uniform.clone(); dot[0, 40:44, 60:62] = 1.0                   # a small bright object on a flat background
+    d_plain = (plain.encoder.encode(dot) - plain.encoder.encode(uniform)).abs().max()
+    d_cs = (cs.encoder.encode(dot) - cs.encoder.encode(uniform)).abs().max()
+    assert d_cs >= d_plain                                              # the surround term never hides the object
+    assert torch.allclose(cs.encoder.encode(uniform), plain.encoder.encode(uniform), atol=1e-5)   # flat background unchanged
+
+
+def test_checkpoint_roundtrip(tmp_path):
+    from nfly.rl.simple.common import load_checkpoint, save_checkpoint
+    env = get_suite("classic").make("cartpole")
+    a = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
+    with torch.no_grad():
+        a.decoder.head.weight.fill_(0.5)
+    save_checkpoint(a, tmp_path / "a.pt", note="cloned")
+    b = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
+    extra = load_checkpoint(b, tmp_path / "a.pt")
+    assert extra == {"note": "cloned"}
+    assert torch.equal(b.decoder.head.weight, a.decoder.head.weight)

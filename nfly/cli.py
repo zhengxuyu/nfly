@@ -21,10 +21,23 @@ def connectome_from_args(args: argparse.Namespace) -> Connectome:
 
 def agent_kwargs(args: argparse.Namespace) -> dict:
     """FlyAgent.build keyword arguments derived from the agent argument group."""
-    kw = {"rnn_steps": args.rnn_steps, "readout_dim": getattr(args, "readout_dim", 32) or None}
+    kw = {"rnn_steps": args.rnn_steps}
+    rd = getattr(args, "readout_dim", None)
+    if rd is not None:
+        kw["readout_dim"] = rd                                         # 0 = no bottleneck
+    if getattr(args, "head_hidden", 0):
+        kw["head_hidden"] = args.head_hidden
     if getattr(args, "freeze_brain", False) or getattr(args, "heads_only", False):
         kw.update(learn_gain=False, learn_alpha=False, learn_bias=False)
     return kw
+
+
+def calibrate_on(agent, env, log=print):
+    """Calibrate the readout on real observations from `env` (a random-policy rollout)."""
+    r2 = agent.calibrate_on_env(env)
+    if r2 is not None:
+        log(f"readout calibrated on {type(env.unwrapped).__name__}: projection R^2 {r2:.3f}, {agent.decoder.n_features} features")
+    return agent
 
 
 def apply_freezes(agent, args: argparse.Namespace):
@@ -38,7 +51,8 @@ def apply_freezes(agent, args: argparse.Namespace):
 def add_agent_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--rnn-steps", type=int, default=4, help="network steps per env step")
     p.add_argument("--freeze-brain", action="store_true", help="train only encoder, readout and heads; keep the connectome parameters fixed")
-    p.add_argument("--readout-dim", type=int, default=32, help="linear bottleneck width between readout neurons and heads (0 = none)")
+    p.add_argument("--readout-dim", type=int, help="linear bottleneck width between readout neurons and heads (default: 32 for vectors, 128 for images; 0 = none)")
     p.add_argument("--heads-only", action="store_true", help="train only the policy and value heads; freeze brain, encoder and readout calibration")
+    p.add_argument("--head-hidden", type=int, default=0, help="diagnostic: tanh MLP policy head of this width (0 = linear head, the default)")
     p.add_argument("--device", default="cpu")
     p.add_argument("--seed", type=int, default=0)

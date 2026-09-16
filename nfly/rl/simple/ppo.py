@@ -34,6 +34,9 @@ class PPOConfig:
     value_coef: float = 0.5
     max_grad: float = 0.5
     target_kl: float | None = 0.02
+    anneal_lr: bool = False       # linear decay of every learning rate to 0 over `updates` (off: neutral for the fly, hurt the MLP)
+    adaptive_lr: bool = False     # after an update, halve the lr if mean KL > 2 * target_kl, raise it x1.5 if < target_kl / 2
+    adaptive_lr_floor: float = 0.1  # adaptive multiplier stays within [floor, 1]
     clip_reward: bool = True
     log_every: int = 10
     save_every: int = 100
@@ -52,11 +55,17 @@ def train_ppo(agent, venv, cfg: PPOConfig, device="cpu", seed: int = 0, log=None
     dev = torch.device(device)
     n_envs = venv.num_envs
     opt = torch.optim.Adam(param_groups(agent, cfg.lr, cfg.brain_lr_scale, cfg.head_fan_in), eps=1e-5)
+    for g in opt.param_groups:
+        g["base_lr"] = g["lr"]
+    lr_scale = 1.0
     obs, _ = venv.reset(seed=seed)
     h = agent.initial_state(n_envs)
     track = Tracker(log) if log else Tracker()
 
     for update in range(1, cfg.updates + 1):
+        frac = 1.0 - (update - 1) / cfg.updates if cfg.anneal_lr else 1.0
+        for g in opt.param_groups:
+            g["lr"] = g["base_lr"] * frac * lr_scale
         ro, obs, h = collect(agent, venv, obs, h, cfg.rollout, dev, cfg.clip_reward)
         track.returns.extend(ro.returns)
         adv, v_target = gae(ro, cfg.gamma, cfg.lam)
@@ -84,8 +93,15 @@ def train_ppo(agent, venv, cfg: PPOConfig, device="cpu", seed: int = 0, log=None
                     stats["clipfrac"] += ((ratio - 1).abs() > cfg.clip).float().mean().item()
                 n_mb += 1
 
+        mean_kl = stats["kl"] / n_mb
+        if cfg.adaptive_lr and cfg.target_kl:
+            if mean_kl > 2 * cfg.target_kl:
+                lr_scale = max(cfg.adaptive_lr_floor, lr_scale * 0.5)
+            elif mean_kl < cfg.target_kl / 2:
+                lr_scale = min(1.0, lr_scale * 1.5)
         if update % cfg.log_every == 0 or update == 1:
-            track.report(update, update * cfg.rollout * n_envs, **{k: v / n_mb for k, v in stats.items()}, epochs=float(n_mb) / max(1, (n_envs + cfg.minibatch_envs - 1) // cfg.minibatch_envs))
+            track.report(update, update * cfg.rollout * n_envs, **{k: v / n_mb for k, v in stats.items()},
+                         epochs=float(n_mb) / max(1, (n_envs + cfg.minibatch_envs - 1) // cfg.minibatch_envs), lr=frac * lr_scale)
         if cfg.out and (update % cfg.save_every == 0 or update == cfg.updates):
             save_checkpoint(agent, cfg.out, returns=track.returns, config=dataclasses.asdict(cfg))
     return track.returns

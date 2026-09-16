@@ -21,6 +21,7 @@ from ray.rllib.models.torch.torch_distributions import TorchCategorical, TorchDi
 
 from ...agent import FlyAgent
 from ...connectome import load_malecns, select_subset
+from ...suite import get_suite
 
 STATE_KEY = "h"
 VALUE_CHUNK = 8    # sequences per chunk when the GAE connector asks for values of a whole train batch
@@ -38,6 +39,9 @@ class FlyRLModule(TorchRLModule, ValueFunctionAPI, TargetNetworkAPI):
                              cfg.get("subset", "visual"))
         self.agent = FlyAgent.build(conn, self.observation_space, self.action_space,
                                     rnn_steps=cfg.get("rnn_steps", 4))
+        if "suite" in cfg and "game" in cfg:                    # calibrate the readout on real observations
+            self.agent.calibrate_on_env(get_suite(cfg["suite"]).make(cfg["game"], seed=cfg.get("seed", 0) + 1000),
+                                        steps=cfg.get("calibration_steps", 512))
 
     def get_initial_state(self) -> dict[str, np.ndarray]:
         return {STATE_KEY: self.agent.h_rest.detach().cpu().numpy().astype(np.float32)}

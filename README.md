@@ -69,6 +69,45 @@ Everything is layered one way (`connectome -> brain -> interface -> agent -> sui
 the brain never sees a game, the suite never sees the brain, and a new task, sense, or algorithm
 is a new subclass in its own layer.
 
+## Anatomy of the agent
+
+`FlyAgent` is five parts. Almost all parameters sit in the brain; the parts we designed are as
+thin as the biology allows, so that whatever the agent can do is attributable to the wiring.
+
+| Part | What it does | Parameters | Origin |
+| --- | --- | --- | --- |
+| 1. Encoder (retina) | frame -> input current of 5,494 photoreceptors: hex photoreceptor layout, centre-surround, temporal contrast | none learnable except one global input gain | our design; geometry from the MaleCNS column coordinates |
+| 2. Brain (`ConnectomeRNN`) | 138,743 neurons, 8.4M edges (visual sub-network), 4 network steps per frame | wiring, signs and synapse counts fixed; one learnable gain per edge (8.4M), one bias and one time constant per neuron | MaleCNS v1.0 |
+| 3. Readout normalisation | activity of the 1,314 descending neurons, mean-centred, scaled and clipped per neuron | one mean and one scale per neuron, set by calibration, fine-tuned by training | our design |
+| 4. Policy head | normalised descending activity -> action logits | linear: 1,314 x 6 (about 8k); `--head-hidden 64` tanh MLP: about 85k | our design |
+| 5. Value head (critic) | descending activity -> state value, used by PPO during training only | 64-unit tanh MLP, about 85k | our design |
+
+The linear policy head is the model's claim: the descending neurons decide the action through
+one weighted vote, so a trained agent's competence is the connectome's, and each weight says which
+descending neuron drives which action. The MLP head is a diagnostic control that stands in for
+the ventral nerve cord circuits between descending and motor neurons; when it learns where the
+linear head does not, the information is in the descending neurons but not in linear form. The
+critic is an MLP as well, but it exists only for training and is not part of the playing agent.
+The baselines (`MLPReference`, `scripts/baseline_cnn_pong.py`) have no brain at all: they check
+that the training pipeline learns on a conventional model.
+
+Two of the encoder's fixed operations, centre-surround and temporal contrast, are computations the
+fly's lamina performs; they live in the encoder because the probe sweep showed each adds about
+0.1 R^2 of ball position at the descending neurons (docs/ablation-cartpole.md, section 11).
+
+## Roadmap
+
+- Pong by reinforcement learning: the readout is sufficient (a head cloned from the CNN plays
+  +19 on the frozen network); credit assignment is the open problem. Running: PPO from a
+  behaviour-cloned head.
+- Learnable encoder: make the input, surround and temporal gains, and possibly a gain per
+  photoreceptor, trainable (photoreceptor adaptation), while keeping the geometry fixed so
+  the encoder cannot become a convolutional front end.
+- CartPole take-off: only about one seed in three learns; find the cause.
+- Motor-neuron readout on the whole CNS, so the ventral nerve cord supplies the nonlinearity
+  between descending and motor neurons and the head stays linear.
+- A classification recipe alongside the Gym one.
+
 ## Installation
 
 ### Environment
@@ -215,8 +254,8 @@ server = serve(SessionConfig(suite="atari", game="breakout", checkpoint="runs/pp
 | `superclass` in `*_sensory`, `sensory_ascending`, `sensory_descending` | input layer, flow = afferent | external drive u(t) enters here |
 | `superclass` in `*_motor`, `*_efferent`, `*_endocrine` | output layer, flow = efferent | |
 | everything else (intrinsic, visual projection, descending, ascending, ...) | hidden layer, flow = intrinsic | |
-| `assignedOlHex1/2` (hex coordinates of optic-lobe columnar cells) | retina coordinates | photoreceptors are placed at the synapse-weighted coordinate of their columnar targets; left eye sees the left half of the frame |
-| `descending_neuron` + `*_motor` | action readout neurons | LayerNorm -> linear heads |
+| `assignedOlHex1/2` (hex coordinates of optic-lobe columnar cells) | retina coordinates | photoreceptors are placed at the synapse-weighted coordinate of their columnar targets; both eyes sample the whole frame by default (`split=True` gives each eye its half) |
+| `descending_neuron` + `*_motor` | action readout neurons | per-neuron calibrated normalisation -> linear head |
 | membrane time constant, threshold | per-neuron alpha_i, b_i | learnable |
 
 Dynamics:
@@ -297,16 +336,23 @@ The full investigation, experiment by experiment, is in [docs/ablation-cartpole.
 
 ### Pong (ALE, max +21, random about -20.7, human about 14.6)
 
-All fly runs use the `visual` sub-network (138,743 neurons, 8.4M edges) on the shared RTX 5090
-and the pre-fix model (rnn_steps 2 or 1, LayerNorm readout); they are kept for the record and
-will be rerun with the fixed model.
+Same machine (one shared RTX 5090, 8 env runners or 16 in-process envs) for every row. Fly runs
+use the `visual` sub-network (138,743 neurons, 8.4M edges).
 
 | Model | Trainer | Config | Env steps | Return | Entropy at end | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
+| **CNN (RLlib tuned Atari PPO)** | RLlib PPO | `scripts/baseline_cnn_pong.py`: 4-frame stack, 4-conv CNN, batch 4000, 10 epochs, lr 1.5e-4 | **356k** | **+19.0** | | reached the stop criterion (>= 18) in 25 minutes; -19 at 280k, +6 at 320k, +14.5 at 352k |
 | Fly | simple A2C | rnn_steps 2, 8 envs, rollout 16, lr 3e-4, entropy 0.01 | 321k | -20.5 | 0.64 | policy collapsed to two actions within 100k steps |
 | Fly | simple PPO | rnn_steps 2, 8 envs, rollout 32, 3 epochs, entropy 0.01 | 289k | -19.8 | 0.55 | slower collapse, no score gain |
 | Fly | RLlib PPO | rnn_steps 2, 8 runners x 2 envs, batch 4096, minibatch 256 | 41k | -20.6 | 1.66 | stopped by a checkpoint-path bug (fixed) |
-| Fly | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 755k | -20.3 | 1.71 | entropy and return flat throughout; 160 env steps / s |
+| Fly | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 755k | -20.3 | 1.71 | pre-fix model; entropy and return flat throughout; 160 env steps / s |
+| Fly v4 / v5 | RLlib APPO | fixed model, official APPO recipe; v5 with per-group lr | 25k / 5k | -21 | 0.0 | collapsed to a deterministic policy |
+| Fly v7 | simple PPO | temporal-contrast retina, 26-d readout subspace, MLP critic, 16 envs, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs | 435k | -21.0 | 1.50 | no collapse, no learning |
+| Fly v8a | simple PPO | as v7 but no readout bottleneck: linear head on all 1,314 descending neurons | 717k | -20.65 | 1.53 | no collapse, no learning at twice the CNN's solving budget |
+| Fly v8c (control) | simple PPO | as v8a with a 64-unit tanh MLP policy head (diagnostic, not the model's claim) | 660k | -20.35 | 1.68 | no learning either |
+| Fly v9 | simple PPO | as v8a with the swept retina: full-field sampling, surround 4, temporal gain 8 (ball y R^2 0.86 at the descending neurons) | 916k | -20.55 | 1.16 | no learning at 2.5x the CNN's solving budget |
+| Fly, frozen + behaviour cloning | supervised (`scripts/bc_pong.py`) | untrained v9 network, linear head on the 1,314 descending neurons cloned from the CNN teacher on 6,000 steps | 6k | -9.7 | | episodes 12, -20, -21; teacher scored 6.0 (19, 16, -17) in the same env |
+| Fly, frozen + behaviour cloning | supervised (`scripts/bc_pong.py`) | untrained v9 network, 64-unit tanh MLP head cloned the same way | 6k | **+8.0** | | episodes 19, 20, -15: the frozen connectome's readout supports Pong at the CNN's level; RL has not found the head |
 
 What the CartPole rows established: the training loop is sound (MLP learns); the connectome
 transmits the full state to the descending neurons (a behaviour-cloned linear head on the
@@ -315,7 +361,9 @@ linear probes on the frozen network, stood between that and reinforcement learni
 dominated by the resting pattern, fast observation components filtered by one step per frame,
 a 10x transient at every reset, a random readout projection half made of drift, and a linear
 critic. With those fixed the fly learns CartPole to the MLP's level and beyond, though not yet
-stably; that stability, and Pong, are the open items.
+stably. On Pong the same sufficiency test passes (a head cloned from the CNN plays +19 on the
+frozen network) while every RL run stays at -20.5, so the open items are CartPole take-off
+stability and credit assignment on Pong, not the model's representation.
 
 To add a row, run one of the training commands above, read the last log line (simple trainers)
 or the last `{"iter": ...}` line (RLlib), and record the config, env steps, return and entropy.
