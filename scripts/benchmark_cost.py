@@ -35,10 +35,10 @@ class PowerMeter(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
         self.samples: list[float] = []
-        self._stop = threading.Event()
+        self._halt = threading.Event()          # not _stop: Thread uses that name internally
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._halt.is_set():
             out = subprocess.run(["nvidia-smi", "--query-gpu=power.draw", "--format=csv,noheader,nounits"],
                                  capture_output=True, text=True)
             try:
@@ -48,7 +48,7 @@ class PowerMeter(threading.Thread):
             time.sleep(0.2)
 
     def stop(self) -> float:
-        self._stop.set(); self.join()
+        self._halt.set(); self.join()
         return statistics.mean(self.samples) if self.samples else float("nan")
 
 
