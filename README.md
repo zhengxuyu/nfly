@@ -14,10 +14,8 @@ real wiring, and descending / motor neurons are read out as actions.
 <p align="center">
   <a href="docs/assets/fly-anatomy.gif?raw=true"><img src="docs/assets/fly-anatomy.gif" alt="Annotated rotating mechanical fly: eyes encode images through hexagonal retina sampling, the body represents a sparse ConnectomeRNN, and feet represent Gymnasium action outputs" width="1120" /></a>
   <br />
-  <em>Eyes: visual input. Body: connectome-constrained recurrent network. Feet: Gym action output.</em>
+  <em>Eyes: visual input. Body: connectome-constrained recurrent network. Feet: Gym action output. (<a href="docs/artwork.md">about the artwork</a>)</em>
 </p>
-
-[Open the GIF](docs/assets/fly-anatomy.gif?raw=true) | [Full-size diagram](docs/assets/fly-anatomy.png) | [Editable Blender scene](docs/assets/mechanical-fly-annotated.blend)
 
 ```text
 observation        (gym observation_space: frames, vectors, ...)
@@ -37,19 +35,14 @@ action             (gym action_space)
 
 ## About the data: Janelia MaleCNS v1.0
 
-![Conceptual neural filaments on a midnight-blue background](docs/assets/background.png)
-
 [MaleCNS](https://male-cns.janelia.org/) is the first complete connectome of an adult male
 *Drosophila melanogaster* central nervous system: brain and ventral nerve cord imaged with
 electron microscopy, every neuron reconstructed and proofread, every synapse detected, and
 166,691 neurons annotated into 11,691 cell types with predicted neurotransmitters. It was
 produced by FlyEM (HHMI Janelia Research Campus) with the University of Cambridge, the MRC
 Laboratory of Molecular Biology and Google Research; version 1.0 was released on 8 June 2026
-under CC-BY 4.0. nfly uses three of its flat-connectome exports (body annotations, body
-neurotransmitters, connectome weights) from the
+under CC-BY 4.0. nfly uses three of its flat-connectome exports from the
 [download page](https://male-cns.janelia.org/download/).
-
-Citation:
 
 > Berg, S., Beckett, I. R., Costa, M., Schlegel, P., Januszewski, M., Marin, E. C., Nern, A.,
 > et al. *Sexual dimorphism in the complete connectome of the Drosophila male central nervous
@@ -65,183 +58,55 @@ Citation:
 | **RL infrastructure** | `nfly.rl.simple`, `nfly.rl.rllib` | Readable pure-PyTorch A2C / PPO for learning and quick experiments; Ray RLlib `FlyRLModule` + config builders (PPO / APPO / IMPALA) for producing models at scale |
 | **Viewer** | `nfly.viz` | Browser page streaming the rendered frame, action probabilities, action timeline and step log for any (policy, env) session, with pause / step / reset |
 
-Everything is layered one way (`connectome -> brain -> interface -> agent -> suite -> rl / viz`):
-the brain never sees a game, the suite never sees the brain, and a new task, sense, or algorithm
-is a new subclass in its own layer.
-
-## Anatomy of the agent
-
-`FlyAgent` is five parts. Almost all parameters sit in the brain; the parts we designed are as
-thin as the biology allows, so that whatever the agent can do is attributable to the wiring.
-
-| Part | What it does | Parameters | Origin |
-| --- | --- | --- | --- |
-| 1. Encoder (retina) | frame -> input current of 5,494 photoreceptors: hex photoreceptor layout, centre-surround, temporal contrast | none learnable except one global input gain | our design; geometry from the MaleCNS column coordinates |
-| 2. Brain (`ConnectomeRNN`) | 138,743 neurons, 8.4M edges (visual sub-network), 4 network steps per frame | wiring, signs and synapse counts fixed; one learnable gain per edge (8.4M), one bias and one time constant per neuron | MaleCNS v1.0 |
-| 3. Readout normalisation | activity of the 1,314 descending neurons, mean-centred, scaled and clipped per neuron | one mean and one scale per neuron, set by calibration, fine-tuned by training | our design |
-| 4. Policy head | normalised descending activity -> action logits | linear: 1,314 x 6 (about 8k); `--head-hidden 64` tanh MLP: about 85k | our design |
-| 5. Value head (critic) | descending activity -> state value, used by PPO during training only | 64-unit tanh MLP, about 85k | our design |
-
-The linear policy head is the model's claim: the descending neurons decide the action through
-one weighted vote, so a trained agent's competence is the connectome's, and each weight says which
-descending neuron drives which action. The MLP head is a diagnostic control that stands in for
-the ventral nerve cord circuits between descending and motor neurons; when it learns where the
-linear head does not, the information is in the descending neurons but not in linear form. The
-critic is an MLP as well, but it exists only for training and is not part of the playing agent.
-The baselines (`MLPReference`, `scripts/baseline_cnn_pong.py`) have no brain at all: they check
-that the training pipeline learns on a conventional model.
-
-Two of the encoder's fixed operations, centre-surround and temporal contrast, are computations the
-fly's lamina performs; they live in the encoder because the probe sweep showed each adds about
-0.1 R^2 of ball position at the descending neurons (docs/ablation-cartpole.md, section 11).
-
-## Roadmap
-
-- Pong by reinforcement learning: the readout is sufficient (a head cloned from the CNN plays
-  +19 on the frozen network); credit assignment is the open problem. Running: PPO from a
-  behaviour-cloned head.
-- Learnable encoder: make the input, surround and temporal gains, and possibly a gain per
-  photoreceptor, trainable (photoreceptor adaptation), while keeping the geometry fixed so
-  the encoder cannot become a convolutional front end.
-- CartPole take-off: only about one seed in three learns; find the cause.
-- Motor-neuron readout on the whole CNS, so the ventral nerve cord supplies the nonlinearity
-  between descending and motor neurons and the head stays linear.
-- A classification recipe alongside the Gym one.
+Everything is layered one way (`connectome -> brain -> interface -> agent -> suite -> rl / viz`);
+a new task, sense, or algorithm is a new subclass in its own layer ([docs/extending.md](docs/extending.md)).
 
 ## Installation
-
-### Environment
-
-The project is managed with [uv](https://docs.astral.sh/uv/): one `pyproject.toml`, one
-`uv.lock`, one `.venv` per checkout.
 
 ```bash
 git clone https://github.com/zhengxuyu/nfly.git && cd nfly
 curl -LsSf https://astral.sh/uv/install.sh | sh        # uv, once per machine
 uv sync --extra dev                                     # .venv with torch, gymnasium, ale-py, ray, pytest
-uv run pytest -q                                        # 25 tests on a synthetic connectome, no download needed
+uv run pytest -q                                        # tests on a synthetic connectome, no download needed
 ```
 
-`uv sync` alone installs only the core (torch, pandas, pyarrow); add `--extra games` for the
-suites and the viewer, `--extra rllib` for Ray. On a CUDA machine `uv sync` resolves the matching
-torch build automatically. Prefix commands with `uv run` or activate `.venv`.
-
-### Data
-
-Three public files from the MaleCNS v1.0 release (CC-BY 4.0, no login, 1.2 GB), into `data/`:
+`uv sync` alone installs only the core; add `--extra games` for the suites and the viewer,
+`--extra rllib` for Ray. Then fetch the three public MaleCNS v1.0 files (CC-BY 4.0, no login,
+1.2 GB) into `data/`:
 
 ```bash
 B=https://storage.googleapis.com/flyem-male-cns/v1.0/connectome-data/flat-connectome
 curl -o data/body-annotations.feather        $B/body-annotations-male-cns-v1.0-minconf-0.5.feather   # 14 MB
 curl -o data/body-neurotransmitters.feather  $B/body-neurotransmitters-male-cns-v1.0.feather         # 43 MB
 curl -o data/connectome-weights.feather      $B/connectome-weights-male-cns-v1.0-minconf-0.5.feather # 1.1 GB
-```
-
-The first load filters the 152M-row weights table down to annotated neurons (about 25 s) and
-caches the result under `data/cache/`. Check that everything is in place:
-
-```bash
-uv run scripts/demo_stimulate.py --class gustatory       # drive taste neurons, see which cell types light up
+uv run scripts/demo_stimulate.py --class gustatory       # first load filters and caches (about 25 s); drives taste neurons
 ```
 
 ## Example: train the fly on Pong and watch it play
 
 Works on a laptop (CPU) end to end; a GPU makes training about 7x faster.
 
-### 1. Play untrained
-
 ```bash
-uv run scripts/play.py --suite atari --game pong          # the whole CNS plays one Pong episode
-```
+# 1. play untrained: the whole CNS plays one Pong episode
+uv run scripts/play.py --suite atari --game pong
 
-### 2. Train
-
-Simple PPO (single process, easiest to read and to modify):
-
-```bash
+# 2. train with the simple PPO (single process, easiest to read and modify) ...
 uv run scripts/train_rl.py --algo ppo --suite atari --game pong --subset visual \
-    --envs 8 --rollout 32 --updates 5000 --device cuda --out runs/ppo-atari-pong.pt
-```
-
-RLlib (multiple env runners, asynchronous APPO, checkpoints every 10 iterations):
-
-```bash
+    --envs 16 --updates 5000 --device cuda --out runs/ppo-atari-pong.pt
+# ... or with RLlib (multiple env runners, asynchronous APPO)
 uv run scripts/train_rllib.py --algo APPO --suite atari --game pong --subset visual \
-    --env-runners 8 --envs-per-runner 2 --gpus 1 --rnn-steps 1 --train-batch 4096 \
-    --entropy-coeff 0.01 --iters 2000 --out runs/rllib-pong
-```
+    --env-runners 8 --envs-per-runner 2 --gpus 1 --train-batch 4096 --iters 2000 --out runs/rllib-pong
 
-Both print one line per update / iteration (return, entropy, KL, timers) and save checkpoints
-atomically, so you can copy or view them while training continues. On a shared or remote GPU
-box, launch with `setsid nohup ... > runs/x.log 2>&1 < /dev/null &` and `tail -f` the log.
-
-### 3. Watch it play
-
-```bash
+# 3. watch it play at http://127.0.0.1:8000
 uv run scripts/serve.py --suite atari --game pong --subset visual --checkpoint runs/ppo-atari-pong.pt
-# open http://127.0.0.1:8000
+
+# 4. swap the task: encoders and decoders are picked from the env's spaces, no model code changes
+uv run scripts/play.py --suite classic --game cartpole
+uv run scripts/train_rl.py --algo ppo --suite gym --game LunarLander-v3
 ```
 
-The page shows the frame, the six action probabilities, a colour-coded action timeline with
-reward ticks and a step log; pause, single-step, reset and change the playback speed from the
-page. Without a checkpoint you get the untrained brain; with `--policy random` you can check any
-env renders before loading a brain.
-
-### 4. Swap the task
-
-```bash
-uv run scripts/play.py --suite classic --game cartpole                      # vector observations, same brain
-uv run scripts/train_rl.py --algo ppo --suite gym --game LunarLander-v3    # any registered Gymnasium id
-```
-
-No model code changes: encoders and decoders are picked from the env's spaces.
-
-## Extending
-
-### Your own game collection
-
-```python
-from nfly.suite import GameSuite, register
-
-@register("mygames")
-class MySuite(GameSuite):
-    def games(self):
-        return ["level1", "level2"]
-
-    def make(self, game, seed=None, render_mode=None, **kw):
-        return self.finish(MyEnv(game, render_mode=render_mode), seed)   # any gym.Env
-```
-
-`make_vector`, `spaces` and `finish` come from the base class; every script accepts
-`--suite mygames --game level1`.
-
-### Your own senses or muscles
-
-Subclass `ObservationEncoder` (provide `idx`, the neurons you drive, and `encode`) or
-`ActionDecoder` (provide `dist_inputs` and `distribution`) and pass them to
-`FlyAgent.build(..., encoder=..., decoder=...)`.
-
-### Your own algorithm
-
-`nfly.rl.simple.common` has rollout collection, GAE and replay; a new trainer is a config
-dataclass plus a loop (see `ppo.py`, about 80 lines). For RLlib, `FlyRLModule` already
-implements the stateful `TorchRLModule` + `ValueFunctionAPI` contract, so any value-based RLlib
-algorithm works through `build_config(algo, ...)`.
-
-### Programmatic use
-
-```python
-from nfly import load_malecns, select_subset, FlyAgent
-from nfly.suite import get_suite, play_episode
-from nfly.viz import SessionConfig, serve
-
-conn = select_subset(load_malecns("data"), "visual")            # all | brain | visual | visual_small
-env = get_suite("atari").make("breakout", seed=0)
-agent = FlyAgent.build(conn, env.observation_space, env.action_space)
-print(play_episode(agent, env).ret)
-
-server = serve(SessionConfig(suite="atari", game="breakout", checkpoint="runs/ppo.pt"), port=8000)
-```
+Both trainers print one line per update (return, entropy, KL, timers) and save checkpoints
+atomically, so the viewer can load them while training continues.
 
 ## Biology -> network
 
@@ -258,140 +123,68 @@ server = serve(SessionConfig(suite="atari", game="breakout", checkpoint="runs/pp
 | `descending_neuron` + `*_motor` | action readout neurons | per-neuron calibrated normalisation -> linear head |
 | membrane time constant, threshold | per-neuron alpha_i, b_i | learnable |
 
-Dynamics:
-
 ```text
 h[t+1] = (1 - alpha) * h[t] + alpha * min( ReLU( W h[t] + b + u[t] ), h_max )
 W[post, pre] = sign(pre) * (syn / sum_in syn) * exp(g_edge)        g_edge learnable, initialised to 0
 ```
 
-The resting bias b starts at 0.1: photoreceptors release only histamine (inhibitory), so with all
-neurons at 0 no inhibitory input could ever be read by a ReLU unit. With a little tonic activity,
-light shows up as a decrease downstream, matching real L1/L2 responses. At global gain 1.0 the
-whole CNS keeps a stable baseline; gain 5 diverges.
+nfly reproduces the fly's **wiring**; everything else (one scalar rate per neuron, no spikes,
+gap junctions, neuromodulation or plasticity, an assumed hex-to-image mapping, a learned
+readout) is a deliberate simplification, so a trained model is connectome-*constrained*, not a
+copy of the animal. Dynamics, sub-networks, the encoder and readout in detail:
+[docs/design.md](docs/design.md).
 
-The sparse product is a gather + `index_add` with a custom backward, processed in edge chunks, so
-backprop through time stores only the (batch x N) state per step and never a (batch x edges)
-tensor. Derived edge weights are computed once per unroll and cached during inference.
+## Anatomy of the agent
 
-### Sub-networks
+`FlyAgent` is five parts. Almost all parameters sit in the brain; the parts we designed are as
+thin as the biology allows, so that whatever the agent can do is attributable to the wiring.
 
-| Name | Content | Neurons | Edges (>= 3 syn) |
+| Part | What it does | Parameters | Origin |
 | --- | --- | --- | --- |
-| all | whole central nervous system | 166,700 | 10.5M |
-| brain | without the ventral nerve cord | ~146,000 | |
-| visual | optic lobes + visual projection + central brain + descending neurons | 138,743 | 8.4M |
-| visual_small | optic lobes + visual projection + descending neurons | 106,579 | 5.2M |
+| 1. Encoder (retina) | frame -> input current of 5,494 photoreceptors: hex photoreceptor layout, centre-surround, temporal contrast | none learnable except one global input gain | our design; geometry from the MaleCNS column coordinates |
+| 2. Brain (`ConnectomeRNN`) | 138,743 neurons, 8.4M edges (visual sub-network), 4 network steps per frame | wiring, signs and synapse counts fixed; one learnable gain per edge (8.4M), one bias and one time constant per neuron | MaleCNS v1.0 |
+| 3. Readout normalisation | activity of the 1,314 descending neurons, mean-centred, scaled and clipped per neuron | calibrated mean and scale per neuron (fixed) plus a learnable shift and gain in standardised units | our design |
+| 4. Policy head | normalised descending activity -> action logits | linear: 1,314 x 6 (about 8k); `--head-hidden 64` tanh MLP: about 85k | our design |
+| 5. Value head (critic) | descending activity -> state value, used by PPO during training only | 64-unit tanh MLP, about 85k | our design |
 
-## What this is and is not
-
-nfly reproduces the fly's **wiring**: which neurons exist, who connects to whom with how many
-synapses, and the predicted sign of each connection. Everything else is a deliberate
-simplification: one scalar rate per neuron, no spikes, ion channels, gap junctions, glia,
-neuromodulation or plasticity rules; game pixels reach the photoreceptors through an assumed
-hex-to-image mapping; the descending-neuron-to-action readout is learned; and training changes
-edge gains, biases and time constants, so a trained model is connectome-*constrained*, not a
-copy of the animal.
-
-## Performance
-
-| Scenario | CPU (M-series laptop) | RTX 5090 |
-| --- | --- | --- |
-| whole CNS playing Pong (inference) | 30 ms / step | 8 ms / step |
-| `visual` subset, simple PPO, 8 envs | 41 steps / s | 220 steps / s |
-| `visual` subset, 32-step unroll fwd+bwd, batch 8 | | 0.9 s (about 280 steps / s) |
-
-Training throughput is bound by the sparse product over millions of edges, not by the RL
-framework. `--rnn-steps 1`, the `visual_small` subset and asynchronous APPO are the three knobs
-that buy the most speed. RLlib stores the recurrent state (one float per neuron) at every time
-step of every episode, so keep `--max-seq-len` moderate.
+The linear policy head is the model's claim: the descending neurons decide the action through
+one weighted vote, so a trained agent's competence is the connectome's. The MLP head is a
+diagnostic control standing in for the ventral nerve cord; the critic exists only for training;
+the baselines (`MLPReference`, `scripts/baseline_cnn_pong.py`) have no brain at all.
 
 ## Benchmarks
 
-Scores obtained so far, recorded as they are, including negative results. "Return" is the mean
-episode return of the last 20 episodes; "MLP" is `nfly.rl.simple.reference.MLPReference`, an
-ordinary 4.7k-parameter network run through the same trainer and config, so the fly can be
-compared against a conventional policy under identical conditions.
+Recorded as they are, including negative results; full tables and throughput numbers in
+[docs/benchmarks.md](docs/benchmarks.md), the experiment-by-experiment record in
+[docs/ablation-cartpole.md](docs/ablation-cartpole.md).
 
-### CartPole-v1 (max 500, random about 22)
+| Task | Conventional model | Fly, reinforcement learning | Fly, frozen + supervised head |
+| --- | --- | --- | --- |
+| CartPole-v1 (max 500) | MLP, simple PPO: 174 at 100k steps | linear head, simple PPO: peak 228 at 97k steps, oscillating; about one seed in three takes off | linear head cloned from a heuristic: 500 / 500 |
+| Pong (max +21) | CNN, RLlib PPO: +19 at 356k steps | -20.5 after up to 916k steps (v7-v9) | MLP head cloned from the CNN: +8.0 (episodes 19, 20, -15); linear head -9.7 |
 
-Simple PPO, 16 envs, rollout 32. Fly runs use the `visual_small` sub-network (106,579
-neurons, 5.2M edges) on one shared RTX 5090; the MLP runs on a laptop CPU.
+The connectome transmits what both tasks need to the descending neurons; on Pong, RL has not
+yet found the head that supervision finds in 6,000 steps.
 
-| Model | Trainer config | Env steps | Return | Notes |
-| --- | --- | --- | --- | --- |
-| MLP | old defaults (lr 2.5e-4, 3 epochs, minibatch 4 envs, gamma 0.99, lambda 0.95, entropy 0.01) | 100k | 80 | loop works, but conservative settings learn slowly |
-| MLP | CleanRL-style (rollout 128, 4 epochs) | 100k | 42 | |
-| MLP | SB3 rl-zoo settings (lr 1e-3, 10 epochs, minibatch 8 envs, gamma 0.98, lambda 0.8, no entropy) | 100k | 223 | |
-| MLP | **current defaults** (zoo settings + target_kl 0.02) | 100k | 174 | |
-| Fly v1 | old defaults; rnn_steps 1, alpha 0.3, LayerNorm readout | 51k | 23 | never above random: observation signal lost at the readout |
-| Fly v2 | old defaults; rnn_steps 4, alpha 0.7, calibrated readout, obs normalisation | 102k | 9 (peak 48) | first run above random, then KL spike (0.16) and collapse under uniform lr 2.5e-4 |
-| Fly v3 | zoo defaults, uniform lr 1e-3 | 5k | 11 | 1,314-input linear head saturated within 10 updates |
-| Fly v4 | zoo defaults, head lr 5e-5 | 56k | 63 | stable, slow rise |
-| Fly v5 | + resting-state start, readout regressed onto observations (4-d), linear critic | 102k | 21 | random level; a linear policy with a linear critic fails on the raw observation too (72 then 19) |
-| **Fly v6** | **v5 + small MLP critic (policy still linear on the readout)** | **102k** | **36 (peak 228 at 97k)** | learns to MLP level and beyond but oscillates: 131, 151, 180, 223, 168, 147, 228, 36 over updates 70-200 |
-| Fly v6, brain frozen | as v6, connectome parameters fixed | 102k | 101 (peak 133) | learns, oscillates more (drops to 21 twice) |
+## Roadmap
 
-The full investigation, experiment by experiment, is in [docs/ablation-cartpole.md](docs/ablation-cartpole.md).
+- Pong by reinforcement learning: the readout is sufficient; credit assignment is the open
+  problem. Running: PPO from a behaviour-cloned head.
+- Learnable encoder: make the input, surround and temporal gains, and possibly a gain per
+  photoreceptor, trainable (photoreceptor adaptation), while keeping the geometry fixed so
+  the encoder cannot become a convolutional front end.
+- CartPole take-off: only about one seed in three learns; find the cause.
+- Motor-neuron readout on the whole CNS, so the ventral nerve cord supplies the nonlinearity
+  between descending and motor neurons and the head stays linear.
+- A classification recipe alongside the Gym one.
 
-### Pong (ALE, max +21, random about -20.7, human about 14.6)
+## Contributing
 
-Same machine (one shared RTX 5090, 8 env runners or 16 in-process envs) for every row. Fly runs
-use the `visual` sub-network (138,743 neurons, 8.4M edges).
-
-| Model | Trainer | Config | Env steps | Return | Entropy at end | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| **CNN (RLlib tuned Atari PPO)** | RLlib PPO | `scripts/baseline_cnn_pong.py`: 4-frame stack, 4-conv CNN, batch 4000, 10 epochs, lr 1.5e-4 | **356k** | **+19.0** | | reached the stop criterion (>= 18) in 25 minutes; -19 at 280k, +6 at 320k, +14.5 at 352k |
-| Fly | simple A2C | rnn_steps 2, 8 envs, rollout 16, lr 3e-4, entropy 0.01 | 321k | -20.5 | 0.64 | policy collapsed to two actions within 100k steps |
-| Fly | simple PPO | rnn_steps 2, 8 envs, rollout 32, 3 epochs, entropy 0.01 | 289k | -19.8 | 0.55 | slower collapse, no score gain |
-| Fly | RLlib PPO | rnn_steps 2, 8 runners x 2 envs, batch 4096, minibatch 256 | 41k | -20.6 | 1.66 | stopped by a checkpoint-path bug (fixed) |
-| Fly | RLlib APPO | rnn_steps 1, 8 runners x 2 envs, batch 4096, minibatch 256, entropy 0.01 | 755k | -20.3 | 1.71 | pre-fix model; entropy and return flat throughout; 160 env steps / s |
-| Fly v4 / v5 | RLlib APPO | fixed model, official APPO recipe; v5 with per-group lr | 25k / 5k | -21 | 0.0 | collapsed to a deterministic policy |
-| Fly v7 | simple PPO | temporal-contrast retina, 26-d readout subspace, MLP critic, 16 envs, gamma 0.99, lambda 0.95, clip 0.1, entropy 0.01, 4 epochs | 435k | -21.0 | 1.50 | no collapse, no learning |
-| Fly v8a | simple PPO | as v7 but no readout bottleneck: linear head on all 1,314 descending neurons | 717k | -20.65 | 1.53 | no collapse, no learning at twice the CNN's solving budget |
-| Fly v8c (control) | simple PPO | as v8a with a 64-unit tanh MLP policy head (diagnostic, not the model's claim) | 660k | -20.35 | 1.68 | no learning either |
-| Fly v9 | simple PPO | as v8a with the swept retina: full-field sampling, surround 4, temporal gain 8 (ball y R^2 0.86 at the descending neurons) | 916k | -20.55 | 1.16 | no learning at 2.5x the CNN's solving budget |
-| Fly, frozen + behaviour cloning | supervised (`scripts/bc_pong.py`) | untrained v9 network, linear head on the 1,314 descending neurons cloned from the CNN teacher on 6,000 steps | 6k | -9.7 | | episodes 12, -20, -21; teacher scored 6.0 (19, 16, -17) in the same env |
-| Fly, frozen + behaviour cloning | supervised (`scripts/bc_pong.py`) | untrained v9 network, 64-unit tanh MLP head cloned the same way | 6k | **+8.0** | | episodes 19, 20, -15: the frozen connectome's readout supports Pong at the CNN's level; RL has not found the head |
-
-What the CartPole rows established: the training loop is sound (MLP learns); the connectome
-transmits the full state to the descending neurons (a behaviour-cloned linear head on the
-frozen, untrained network scores 500/500); and five interface and training defects, found with
-linear probes on the frozen network, stood between that and reinforcement learning: a readout
-dominated by the resting pattern, fast observation components filtered by one step per frame,
-a 10x transient at every reset, a random readout projection half made of drift, and a linear
-critic. With those fixed the fly learns CartPole to the MLP's level and beyond, though not yet
-stably. On Pong the same sufficiency test passes (a head cloned from the CNN plays +19 on the
-frozen network) while every RL run stays at -20.5, so the open items are CartPole take-off
-stability and credit assignment on Pong, not the model's representation.
-
-To add a row, run one of the training commands above, read the last log line (simple trainers)
-or the last `{"iter": ...}` line (RLlib), and record the config, env steps, return and entropy.
-
-## Code principles
-
-The project follows the code-smell catalogue at
-<https://refactoring.guru/refactoring/smells>. The checklist applied to every change lives in
-[CLAUDE.md](CLAUDE.md), together with the language rule (all committed text in English, ASCII
-source), the one-directional layer rule and the uv-only environment rule.
+Code follows the smell catalogue at <https://refactoring.guru/refactoring/smells>; the
+checklist, the English-only and one-directional-layer rules and the uv-only environment rule
+are in [CLAUDE.md](CLAUDE.md). Issues and PRs welcome.
 
 ## License and citation
 
-Code: [MIT](LICENSE). Data: MaleCNS v1.0, CC-BY 4.0 (see [About the data](#about-the-data-janelia-malecns-v10)
-for the citation). Please cite the MaleCNS paper when you publish results built on this model.
-
-README artwork: the [hero](docs/assets/hero-mechanical.png) and [neural background](docs/assets/background.png)
-are AI-generated illustrations, not MaleCNS visualisations. The [mechanical fly animation](docs/assets/fly-anatomy.gif)
-is rendered frame by frame in Blender from a 3D model with titanium armor plates, hexagonal optical
-lenses, machined fasteners, piston-driven legs and translucent photonic wings. It is conceptual artwork.
-Its camera-facing labels map the eyes to `RetinaEncoder`, the body to the sparse rate-based
-`ConnectomeRNN`, and the feet to `ActionDecoder`. The six feet illustrate output collectively;
-they do not imply six fixed actions. The frame-to-hex diagram is illustrative, not a recorded rollout.
-View the [full-resolution diagram](docs/assets/fly-anatomy.png), open the
-[annotated Blender scene](docs/assets/mechanical-fly-annotated.blend), or regenerate with Blender and FFmpeg:
-
-```bash
-blender --background docs/assets/mechanical-fly.blend \
-  --python docs/assets/annotate_mechanical_blender.py -- --frames 72
-uv run python docs/assets/assemble_anatomy.py
-```
+Code: [MIT](LICENSE). Data: MaleCNS v1.0, CC-BY 4.0; please cite the MaleCNS paper above when
+you publish results built on this model. README artwork: [docs/artwork.md](docs/artwork.md).
