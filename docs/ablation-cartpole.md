@@ -373,5 +373,7 @@ Open:
 - Take-off on CartPole is not fixed by entropy 0.01 (seeds 1, 2 stayed at 20-44) or by 64 envs
   (seed 1 stayed at 20).
 - RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
+- The encoder is fixed apart from one global gain; a learnable version (input, surround and
+  temporal gains, possibly a gain per photoreceptor, geometry still fixed) is untried.
 - What the optic lobe contributes beyond transmission is still unmeasured; section 12 shows
   transmission alone is enough for Pong once a head is found.

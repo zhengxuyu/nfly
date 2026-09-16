@@ -69,6 +69,45 @@ Everything is layered one way (`connectome -> brain -> interface -> agent -> sui
 the brain never sees a game, the suite never sees the brain, and a new task, sense, or algorithm
 is a new subclass in its own layer.
 
+## Anatomy of the agent
+
+`FlyAgent` is five parts. Almost all parameters sit in the brain; the parts we designed are as
+thin as the biology allows, so that whatever the agent can do is attributable to the wiring.
+
+| Part | What it does | Parameters | Origin |
+| --- | --- | --- | --- |
+| 1. Encoder (retina) | frame -> input current of 5,494 photoreceptors: hex photoreceptor layout, centre-surround, temporal contrast | none learnable except one global input gain | our design; geometry from the MaleCNS column coordinates |
+| 2. Brain (`ConnectomeRNN`) | 138,743 neurons, 8.4M edges (visual sub-network), 4 network steps per frame | wiring, signs and synapse counts fixed; one learnable gain per edge (8.4M), one bias and one time constant per neuron | MaleCNS v1.0 |
+| 3. Readout normalisation | activity of the 1,314 descending neurons, mean-centred, scaled and clipped per neuron | one mean and one scale per neuron, set by calibration, fine-tuned by training | our design |
+| 4. Policy head | normalised descending activity -> action logits | linear: 1,314 x 6 (about 8k); `--head-hidden 64` tanh MLP: about 85k | our design |
+| 5. Value head (critic) | descending activity -> state value, used by PPO during training only | 64-unit tanh MLP, about 85k | our design |
+
+The linear policy head is the model's claim: the descending neurons decide the action through
+one weighted vote, so a trained agent's competence is the connectome's, and each weight says which
+descending neuron drives which action. The MLP head is a diagnostic control that stands in for
+the ventral nerve cord circuits between descending and motor neurons; when it learns where the
+linear head does not, the information is in the descending neurons but not in linear form. The
+critic is an MLP as well, but it exists only for training and is not part of the playing agent.
+The baselines (`MLPReference`, `scripts/baseline_cnn_pong.py`) have no brain at all: they check
+that the training pipeline learns on a conventional model.
+
+Two of the encoder's fixed operations, centre-surround and temporal contrast, are computations the
+fly's lamina performs; they live in the encoder because the probe sweep showed each adds about
+0.1 R^2 of ball position at the descending neurons (docs/ablation-cartpole.md, section 11).
+
+## Roadmap
+
+- Pong by reinforcement learning: the readout is sufficient (a head cloned from the CNN plays
+  +19 on the frozen network); credit assignment is the open problem. Running: PPO from a
+  behaviour-cloned head.
+- Learnable encoder: make the input, surround and temporal gains, and possibly a gain per
+  photoreceptor, trainable (photoreceptor adaptation), while keeping the geometry fixed so
+  the encoder cannot become a convolutional front end.
+- CartPole take-off: only about one seed in three learns; find the cause.
+- Motor-neuron readout on the whole CNS, so the ventral nerve cord supplies the nonlinearity
+  between descending and motor neurons and the head stays linear.
+- A classification recipe alongside the Gym one.
+
 ## Installation
 
 ### Environment
@@ -215,8 +254,8 @@ server = serve(SessionConfig(suite="atari", game="breakout", checkpoint="runs/pp
 | `superclass` in `*_sensory`, `sensory_ascending`, `sensory_descending` | input layer, flow = afferent | external drive u(t) enters here |
 | `superclass` in `*_motor`, `*_efferent`, `*_endocrine` | output layer, flow = efferent | |
 | everything else (intrinsic, visual projection, descending, ascending, ...) | hidden layer, flow = intrinsic | |
-| `assignedOlHex1/2` (hex coordinates of optic-lobe columnar cells) | retina coordinates | photoreceptors are placed at the synapse-weighted coordinate of their columnar targets; left eye sees the left half of the frame |
-| `descending_neuron` + `*_motor` | action readout neurons | LayerNorm -> linear heads |
+| `assignedOlHex1/2` (hex coordinates of optic-lobe columnar cells) | retina coordinates | photoreceptors are placed at the synapse-weighted coordinate of their columnar targets; both eyes sample the whole frame by default (`split=True` gives each eye its half) |
+| `descending_neuron` + `*_motor` | action readout neurons | per-neuron calibrated normalisation -> linear head |
 | membrane time constant, threshold | per-neuron alpha_i, b_i | learnable |
 
 Dynamics:
