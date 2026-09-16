@@ -15,6 +15,7 @@ from nfly import FlyAgent
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, apply_freezes, calibrate_on, connectome_from_args
 from nfly.rl import A2CConfig, PPOConfig, train_a2c, train_ppo
 from nfly.rl.simple.common import load_checkpoint
+from nfly.rl.simple.reference import MLPReference
 from nfly.suite import get_suite
 
 TRAINERS = {"a2c": (A2CConfig, train_a2c), "ppo": (PPOConfig, train_ppo)}
@@ -25,6 +26,8 @@ def main() -> None:
     add_connectome_args(p, subset="visual")
     add_agent_args(p)
     p.add_argument("--algo", default="ppo", choices=list(TRAINERS))
+    p.add_argument("--model", default="fly", choices=["fly", "mlp"], help="mlp = MLPReference through the same trainer (no connectome)")
+    p.add_argument("--mlp-hidden", type=int, nargs="+", default=[64], help="MLP layer widths (one value = two equal layers)")
     p.add_argument("--suite", default="atari")
     p.add_argument("--game", default="pong")
     p.add_argument("--envs", type=int, default=8)
@@ -42,10 +45,14 @@ def main() -> None:
     args = p.parse_args()
     torch.manual_seed(args.seed)
 
-    conn = connectome_from_args(args)
     venv = get_suite(args.suite).make_vector(args.game, args.envs, seed=args.seed)
-    agent = FlyAgent.build(conn, venv.single_observation_space, venv.single_action_space, **agent_kwargs(args)).to(args.device)
-    calibrate_on(agent, get_suite(args.suite).make(args.game, seed=args.seed))
+    if args.model == "mlp":
+        hidden = args.mlp_hidden[0] if len(args.mlp_hidden) == 1 else args.mlp_hidden
+        agent = MLPReference(venv.single_observation_space, venv.single_action_space, hidden).to(args.device)
+    else:
+        conn = connectome_from_args(args)
+        agent = FlyAgent.build(conn, venv.single_observation_space, venv.single_action_space, **agent_kwargs(args)).to(args.device)
+        calibrate_on(agent, get_suite(args.suite).make(args.game, seed=args.seed))
     if args.init:
         load_checkpoint(agent, args.init)
         print(f"agent state loaded from {args.init}")
@@ -61,7 +68,7 @@ def main() -> None:
         if args.no_adaptive_lr:
             overrides["adaptive_lr"] = False
     overrides.update({k: json.loads(v) for k, v in (kv.split("=", 1) for kv in args.set)})
-    cfg = config_cls(updates=args.updates, out=args.out or f"runs/{args.algo}-{args.suite}-{args.game}.pt", **overrides)
+    cfg = config_cls(updates=args.updates, out=args.out or f"runs/{args.algo}-{args.model}-{args.suite}-{args.game}.pt", **overrides)
     train(agent, venv, cfg, device=args.device, seed=args.seed)
 
 
