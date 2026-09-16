@@ -382,3 +382,16 @@ def test_pixel_critic_reads_the_observation_not_the_readout():
     assert value.shape == (3,) and dist.probs.shape == (3, 4)
     value.sum().backward()
     assert a.value.net[0][0].weight.grad is not None and a.decoder.head.weight.grad is None
+
+
+def test_checkpoint_policy_carries_over_to_another_critic(tmp_path):
+    from nfly.rl.simple.common import load_checkpoint, save_checkpoint
+    c = visual_connectome()
+    space = gym.spaces.Box(0, 1, (2, 84, 84), np.float32)
+    a = FlyAgent.build(c, space, gym.spaces.Discrete(4), head_hidden=8)
+    with torch.no_grad():
+        a.decoder.head[0].weight.fill_(0.25)
+    save_checkpoint(a, tmp_path / "a.pt")
+    b = FlyAgent.build(c, space, gym.spaces.Discrete(4), head_hidden=8, critic="pixels")
+    load_checkpoint(b, tmp_path / "a.pt")
+    assert torch.equal(b.decoder.head[0].weight, a.decoder.head[0].weight)   # policy restored, critic left fresh

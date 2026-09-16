@@ -109,7 +109,18 @@ def save_checkpoint(agent, path: str | Path, **extra) -> None:
 
 
 def load_checkpoint(agent, path: str | Path) -> dict:
-    """Restore the agent's state from `save_checkpoint` output; returns the extra fields."""
+    """Restore the agent's state from `save_checkpoint` output; returns the extra fields.
+
+    A checkpoint's critic may not fit the agent's (a different critic architecture is a
+    training choice, not part of the policy): value tensors whose shape differs are skipped
+    and the agent keeps its fresh critic, so a policy can be carried between critic setups."""
     payload = torch.load(path, map_location=next(agent.parameters()).device, weights_only=False)
-    agent.load_state_dict(payload.pop("agent"))
+    state, own = payload.pop("agent"), agent.state_dict()
+    compatible = {k: v for k, v in state.items() if not k.startswith("value.") or (k in own and own[k].shape == v.shape)}
+    if len(compatible) < len(state) or any(k.startswith("value.") and k not in compatible for k in own):
+        compatible = {k: v for k, v in compatible.items() if not k.startswith("value.")}   # all or nothing for the critic
+        missing, unexpected = agent.load_state_dict(compatible, strict=False)
+        assert all(k.startswith("value.") for k in missing) and not unexpected, (missing, unexpected)
+    else:
+        agent.load_state_dict(compatible)
     return payload
