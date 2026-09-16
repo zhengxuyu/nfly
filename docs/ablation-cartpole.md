@@ -520,6 +520,19 @@ same separation and the same failure.
 the policy head's hidden layer so the value loss trains it; (b) a privileged critic during
 training (the ALE RAM state, or a small CNN on pixels), which makes the advantage informative
 without touching the fly. Both keep the agent's policy "wiring plus one readout" at test time.
+
+**Test of (a).** PPO from the DAgger head (greedy +13.4; sampled at 1.0 nats about -14), brain
+frozen, v9 settings, 16 envs:
+
+| Critic | Updates | Return (last 20) | Value loss |
+| --- | --- | --- | --- |
+| separate MLP on the readout (the usual) | 340 | -17.6, flat between -14 and -18 | 0.03 to 0.13, no trend |
+| shared trunk (`--share-trunk`) | 250 | -20.6, eroding | 0.06 to 0.11, no trend |
+
+Sharing the trunk does not make the critic learn on the frozen readout; the value gradient only
+disturbs the policy's hidden layer. The 64-unit layer on top of the readout is not enough of a
+representation for the return, which needs where the ball is heading over the next 20 to 60
+frames, not just where it is. Test of (b), the pixel critic, follows.
 Reward shaping (ball to paddle distance) attacks the sparsity itself. The linear head is a
 separate limit: DAgger with a linear readout stays at -19 (fit accuracy 69%), so Pong's policy
 is not linearly readable from the descending neurons; the MLP head's 64 units are needed.
