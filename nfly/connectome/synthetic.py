@@ -23,17 +23,20 @@ def write_synthetic(data_dir: Path, n_columns: int = 30, n_central: int = 300, n
     rows, w_pre, w_post, w_syn = [], [], [], []
     bid = 10000
 
-    def add(**kw):
+    def add(soma=True, **kw):
         nonlocal bid
         bid += 1
-        rows.append(dict(bodyId=bid, **kw)); return bid
+        # toy soma positions in 8 nm voxels: left / right optic lobes at the sides, brain in the middle
+        x = {"L": 20000, "R": 80000}.get(kw.get("somaSide"), 50000) + int(rng.integers(-8000, 8000))
+        loc = [x, int(rng.integers(20000, 40000)), int(rng.integers(20000, 40000))] if soma else None
+        rows.append(dict(bodyId=bid, somaLocation=loc, **kw)); return bid
 
     # optic lobes: one photoreceptor + L1 + L2 per hex column per eye
     columns = []
     for side in ("L", "R"):
         for c in range(n_columns):
             h1, h2 = float(c % 6 + 1), float(c // 6 + 1)
-            pr = add(superclass="ol_sensory", type="R1-R6", cls="visual", somaSide=side, nt="histamine")
+            pr = add(soma=False, superclass="ol_sensory", type="R1-R6", cls="visual", somaSide=side, nt="histamine")
             l1 = add(superclass="ol_intrinsic", type="L1", cls=None, somaSide=side, nt="glutamate", hex1=h1, hex2=h2)
             l2 = add(superclass="ol_intrinsic", type="L2", cls=None, somaSide=side, nt="acetylcholine", hex1=h1, hex2=h2)
             for tgt in (l1, l2):
@@ -54,7 +57,7 @@ def write_synthetic(data_dir: Path, n_columns: int = 30, n_central: int = 300, n
     df = pd.DataFrame(rows)
     pd.DataFrame({"bodyId": df.bodyId, "superclass": df.superclass, "type": df.type, "class": df.cls,
                   "somaSide": df.somaSide, "instance": df.type, "statusLabel": "Roughly traced",
-                  "assignedOlHex1": df.get("hex1"), "assignedOlHex2": df.get("hex2")}
+                  "assignedOlHex1": df.get("hex1"), "assignedOlHex2": df.get("hex2"), "somaLocation": df.somaLocation}
                  ).to_feather(data_dir / "body-annotations.feather")
     nt = df[df.nt.notna()]
     pd.DataFrame({"body": nt.bodyId, "consensus_nt": nt.nt, "predicted_nt_confidence": rng.random(len(nt))}

@@ -347,6 +347,110 @@ The natural next steps are on the RL side: initialise the head from behaviour cl
 PPO continue (DAgger-style), or shape the reward with the ball-paddle distance, before touching
 the brain again.
 
+## 13. PPO from the cloned head: the readout normalisation was never trainable at that rate
+
+**Experiment.** `train_rl.py --init` starts PPO (v9 settings) from the behaviour-cloned heads of
+section 12, logits tempered to 1.0 nats so the sampled policy can still move (sampled play:
+linear -18.7, MLP -5.3).
+
+**Result.** Update 1 had KL 722 (linear) and 7.3 (MLP); entropy went to 0.000 and 0.005 and the
+gradient to zero. Both runs were dead after one update. The tempering changed nothing (fitted
+logits were already at 1.2 / 0.8 nats), so the cause was not over-confident logits.
+
+Four-update diagnostics with the same linear checkpoint:
+
+| Trainable | KL at update 1 | Entropy after |
+| --- | --- | --- |
+| everything (default) | 722 | 0.000 |
+| brain frozen (`--freeze-brain`) | 719 | 0.000 |
+| brain lr x 0.001 | 720 | 0.000 |
+| heads only (`--heads-only`) | 0.000 | 0.99 (unchanged) |
+
+Neither the brain nor the heads: what remained trainable in the second row was the encoder's
+input gain and the readout normalisation's per-neuron `mean` and `log_scale`, in the "rest"
+group at the full lr 1e-3. A descending neuron's activity spread is far below 1e-3 in raw
+units, so one Adam step on `mean` moved every feature by many standard deviations, the
+features saturated at the clip, and the linear head's logits went with them.
+
+**Fix.** `ReadoutNorm` keeps the calibrated `mean` and `scale` as fixed buffers and trains a
+per-neuron `shift` and `log_gain` in standardised units, both zero after calibration; a step
+of 1e-3 is now 1e-3 of a spread. Old checkpoints do not load (different state keys).
+
+**After the fix**, the same four-update diagnostic (linear cloned head, v9 settings):
+
+| Trainable | KL at update 1 | Entropy after 4 updates |
+| --- | --- | --- |
+| brain frozen | 0.001 | 1.09 |
+| brain lr x 0.01 (1e-5) | 10.6 | 0.000 |
+| brain lr x 0.001 (1e-6) | 0.34 | 0.75 (epochs early-stopped) |
+| brain lr x 0.0001 (1e-7) | 0.003 | 1.11 |
+
+The normalisation no longer blows up, but the brain does at any learning rate above about
+1e-7, four orders of magnitude below the head's. The reason is in the calibrated statistics:
+99.6% of the descending neurons have a spread at the `min_std` floor of 1e-4 against a resting
+level of about 0.1 (median mean / spread 1,069). The observation-driven part of a descending
+neuron's activity is below one thousandth of its resting activity, so a brain step that moves
+that activity by 0.1% moves the feature by a full spread, and 1% saturates it. Input gain 5
+to 200 leaves the statistics unchanged to four digits: photoreceptors are inhibitory onto
+lamina neurons resting at 0.1, so beyond a little light they are silenced and the signal
+amplitude is capped by the resting level, then decays through the layers.
+
+Without the floor (`min_std` 1e-12), the true spread of a descending neuron over a random
+rollout is 1.6e-6 (median; 1st to 99th percentile 8e-8 to 4e-5), 1.7e-5 of its resting level.
+The floor therefore compresses the features about 60-fold below unit variance, and the head
+undoes that with large weights, which is the same sensitivity seen from the other side. The
+global synaptic scale is not a clean lever: at 1.5 some neurons already sit at the activity
+ceiling `h_max` = 10, and at 4.0 half the descending neurons are still at the floor while their
+median resting level has fallen from 0.107 to 0.020. Runaway subcircuits saturate before the
+visual signal grows.
+
+**Consequence for the earlier rows.** Every RL run since v2 had these parameters drifting at
+lr 1e-3 under a zero-initialised head, where the drift is invisible in KL but still moves the
+features the head is trying to read. That is a candidate cause for the CartPole take-off
+lottery (section 9) and for part of the Pong failure; v9 and the CartPole seeds should be
+rerun with the fix before any further model changes.
+
+## 14. The viewer finds a distorted eye
+
+**Observation.** The new viewer panel that draws every photoreceptor at the position where it
+samples the frame showed each eye covering a triangle, not an oval: the left eye the lower-left
+half of the frame, the right eye the lower-right, the top strip sampled by almost nothing.
+
+**Cause.** `hex_to_xy` turned the MaleCNS hex column coordinates into plane positions with the
+shear x = h1 + h2 / 2. For the release's axes the sign is the other way: with + the columns of
+one eye form a diagonal band (x-y correlation 0.80, filling 46% of the bounding box), which the
+per-eye bounding-box normalisation stretches into two triangles; with x = h1 - h2 / 2 the
+correlation is 0.03 and the fill 80%, a round eye.
+
+**Fix.** The sign. Photoreceptor sampling positions change for every image task, so the retina
+sweep (section 11), the probes, v9 and the behaviour-cloning results (section 12) were all
+obtained with the distorted eye and are due for a rerun. The other findings (readout floor,
+normalisation drift, brain sensitivity) do not depend on where the eye samples.
+
+**Second look.** With the round eye the panel showed the remaining gap: an oval on a rectangle.
+Measured on an 84x84 frame (a pixel counts as seen if a photoreceptor samples within 2 px):
+
+| Eye mapping | whole frame | paddle columns (outer 12%) | top / bottom 12% |
+| --- | --- | --- | --- |
+| round eye, bounding box to frame | 85% | 59% | 54% |
+| round eye warped onto the square (`fill_frame`, elliptical-grid mapping) | 98% | 92% | 94% |
+
+Pong's paddles live in the outer columns and the ball turns at the top and bottom walls, so
+the first row means the eye barely saw the events that decide a point. The readout probe
+agrees (frozen network, held-out R^2 at the descending neurons, same retina settings for both
+rows: temporal gain 4, no surround):
+
+| Eye mapping | ball x | ball y | player paddle y | cpu paddle y |
+| --- | --- | --- | --- | --- |
+| round eye, oval on the frame | 0.20 | 0.65 | 0.74 | 0.49 |
+| round eye warped onto the square | 0.23 | 0.72 | 0.75 | 0.81 |
+
+The CPU paddle, in the far column, is the target the oval lost; ball x, never decodable with
+the distorted eye, is now weakly present at both settings. `fill_frame=True` is
+now the default; it is a deliberate distortion of the eye's field of view onto the game frame,
+documented in docs/design.md. The 5,494 photoreceptors occupy 1,633 distinct positions (the
+R1-R8 of one ommatidium share a column), unchanged by the warp.
+
 ## What is settled and what is open
 
 Settled:
@@ -368,11 +472,16 @@ Settled by v6:
 Open:
 - Take-off: only about one seed in three learns CartPole at all (section 9).
 - Pong, RL: no run has left -20.5 (v7-v9, up to 916k steps), although the readout is
-  sufficient (section 12). Credit assignment is the open problem; behaviour-cloned
-  initialisation or reward shaping are the untried levers.
+  sufficient (section 12). Those runs, and the CartPole seeds, trained the readout
+  normalisation at a rate that saturates the features (section 13); rerun with the fix, then
+  behaviour-cloned initialisation or reward shaping if they still fail.
 - Take-off on CartPole is not fixed by entropy 0.01 (seeds 1, 2 stayed at 20-44) or by 64 envs
   (seed 1 stayed at 20).
 - RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
+- Rerun the retina sweep, v9 and the Pong behaviour cloning with the round eye (section 14).
+- The wiring's potential advantages are unmeasured: sample efficiency, transfer, robustness to
+  input perturbations, and cost on event-driven hardware. Each needs a matched comparison
+  against the equal-parameter MLP and the CNN.
 - The encoder is fixed apart from one global gain; a learnable version (input, surround and
   temporal gains, possibly a gain per photoreceptor, geometry still fixed) is untried.
 - What the optic lobe contributes beyond transmission is still unmeasured; section 12 shows

@@ -27,6 +27,8 @@ def agent_kwargs(args: argparse.Namespace) -> dict:
         kw["readout_dim"] = rd                                         # 0 = no bottleneck
     if getattr(args, "head_hidden", 0):
         kw["head_hidden"] = args.head_hidden
+    if getattr(args, "split_eyes", False):
+        kw["encoder_kw"] = {"split": True}
     if getattr(args, "freeze_brain", False) or getattr(args, "heads_only", False):
         kw.update(learn_gain=False, learn_alpha=False, learn_bias=False)
     return kw
@@ -54,5 +56,6 @@ def add_agent_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--readout-dim", type=int, help="linear bottleneck width between readout neurons and heads (default: 32 for vectors, 128 for images; 0 = none)")
     p.add_argument("--heads-only", action="store_true", help="train only the policy and value heads; freeze brain, encoder and readout calibration")
     p.add_argument("--head-hidden", type=int, default=0, help="diagnostic: tanh MLP policy head of this width (0 = linear head, the default)")
+    p.add_argument("--split-eyes", action="store_true", help="retina: each eye sees its half of the frame at double density (default: both eyes see the whole frame)")
     p.add_argument("--device", default="cpu")
     p.add_argument("--seed", type=int, default=0)

@@ -203,12 +203,22 @@ class FlyAgent(nn.Module):
 
         Callers that unroll several steps with gradients should pass `weights=self.brain.weights()`
         computed once, so autograd does not keep E-sized intermediates per step."""
-        weights = weights or self.brain.weights()
-        drive = self.encoder.encode(obs) * self.input_gain
-        u = torch.zeros_like(h).index_copy(1, self.encoder.idx, drive)
-        for _ in range(self.rnn_steps):
-            h = self.brain.step(h, u, weights)
+        h = self.trace(obs, h, weights)[-1]
         return self.decoder.features(h), h
+
+    def drive(self, obs: torch.Tensor) -> torch.Tensor:
+        """Input current delivered to the input neurons for obs: (B, K) in encoder order."""
+        return self.encoder.encode(obs) * self.input_gain
+
+    def trace(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None) -> list[torch.Tensor]:
+        """The state after each of the rnn_steps network steps of one env step; the last entry
+        is the new h. Lets a viewer show activity propagating within a frame."""
+        weights = weights or self.brain.weights()
+        u = torch.zeros_like(h).index_copy(1, self.encoder.idx, self.drive(obs))
+        states = []
+        for _ in range(self.rnn_steps):
+            h = self.brain.step(h, u, weights); states.append(h)
+        return states
 
     def forward(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None):
         """Returns (action distribution, value (B,), new h)."""
@@ -217,10 +227,17 @@ class FlyAgent(nn.Module):
 
     def act(self, obs, h, greedy: bool = False):
         """Convenience for evaluation: returns (env action, new h)."""
+        action, h, _, _ = self.act_traced(obs, h, greedy)
+        return action, h
+
+    def act_traced(self, obs, h, greedy: bool = False):
+        """act() that also returns the action distribution and the per-sub-step states, so a
+        viewer gets action, probabilities and brain activity from one pass."""
         with torch.no_grad():
-            dist, _, h = self(obs, h)
+            states = self.trace(obs, h)
+            dist = self.decoder.distribution(self.decoder.features(states[-1]))
             a = dist.mode if greedy else dist.sample()
-        return self.decoder.to_env(a), h
+        return self.decoder.to_env(a), states[-1], dist, states
 
     def summary(self) -> str:
         return (f"FlyAgent: {self.n_neurons:,} neurons, {self.brain.pre.numel():,} edges | "

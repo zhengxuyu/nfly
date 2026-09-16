@@ -17,14 +17,17 @@ descending neurons), which shows where a signal such as the ball's position is l
 from __future__ import annotations
 
 import argparse
+import inspect
 
 import numpy as np
 import torch
 
 from nfly import FlyAgent
+from nfly.interface import RetinaEncoder
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrate_on, connectome_from_args
 from nfly.suite import get_suite
 
+RETINA_DEFAULTS = {k: v.default for k, v in inspect.signature(RetinaEncoder.__init__).parameters.items() if k in ("temporal_gain", "surround")}
 PONG_RAM = {"ball x": 49, "ball y": 54, "player paddle y": 51, "cpu paddle y": 50}
 
 # Successive stages of the fly visual pathway, by MaleCNS cell type / superclass.
@@ -84,9 +87,10 @@ def main() -> None:
     p.add_argument("--steps", type=int, default=1500)
     p.add_argument("--layers", action="store_true", help="also probe successive stages of the visual pathway")
     p.add_argument("--alpha", type=float, default=0.7, help="leak per network step")
-    p.add_argument("--temporal-gain", type=float, default=4.0, help="retina: weight of the change channel")
-    p.add_argument("--surround", type=float, default=0.0, help="retina: weight of the centre-surround term")
+    p.add_argument("--temporal-gain", type=float, default=RETINA_DEFAULTS["temporal_gain"], help="retina: weight of the change channel")
+    p.add_argument("--surround", type=float, default=RETINA_DEFAULTS["surround"], help="retina: weight of the centre-surround term")
     p.add_argument("--full-field", action="store_true", help="retina: both eyes see the whole frame instead of one half each")
+    p.add_argument("--no-fill-frame", action="store_true", help="retina: keep each eye an oval instead of warping it onto the frame")
     p.add_argument("--input-gain", type=float, default=5.0, help="initial input gain")
     p.add_argument("--max-neurons", type=int, default=3000, help="--layers: random subset size per stage")
     args = p.parse_args()
@@ -95,10 +99,11 @@ def main() -> None:
     conn = connectome_from_args(args)
     env = get_suite(args.suite).make(args.game, seed=args.seed)
     agent = FlyAgent.build(conn, env.observation_space, env.action_space, alpha_init=args.alpha, input_gain=args.input_gain,
-                           encoder_kw={"temporal_gain": args.temporal_gain, "surround": args.surround, "split": not args.full_field},
+                           encoder_kw={"temporal_gain": args.temporal_gain, "surround": args.surround, "split": not args.full_field,
+                                       "fill_frame": not args.no_fill_frame},
                            **agent_kwargs(args)).to(args.device).eval()
     print(f"config: rnn_steps {args.rnn_steps} alpha {args.alpha} temporal_gain {args.temporal_gain} surround {args.surround} "
-          f"full_field {args.full_field} input_gain {args.input_gain}", flush=True)
+          f"full_field {args.full_field} fill_frame {not args.no_fill_frame} input_gain {args.input_gain}", flush=True)
     calibrate_on(agent, get_suite(args.suite).make(args.game, seed=args.seed + 1000))
 
     rng = np.random.default_rng(args.seed)

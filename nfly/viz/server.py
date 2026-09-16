@@ -3,6 +3,9 @@ stream and a control endpoint.  No framework dependency, so it runs anywhere the
 
     GET  /                 the visualiser page
     GET  /api/state        session description + recent action history
+    GET  /api/anatomy      neuron positions, stages and photoreceptor layout for the 3-D view
+    GET  /api/anatomy/meshes     official neuropil meshes (when fetched by scripts/fetch_anatomy.py)
+    GET  /api/anatomy/skeletons  official skeletons of the neurons that have one
     GET  /api/stream       text/event-stream of step events (frame, action, reward, probs)
     POST /api/control      {"cmd": "pause" | "resume" | "step" | "reset" | "fps", "fps": 15}
 """
@@ -18,7 +21,12 @@ from importlib import resources
 from .session import Session, SessionConfig, build_session
 from .streamer import Broadcast, EpisodeStreamer
 
-PAGE = resources.files(__package__).joinpath("static/index.html").read_text(encoding="utf-8")
+PAGE_FILE = resources.files(__package__).joinpath("static/index.html")
+
+
+def page() -> bytes:
+    """Read the page on every request (it is 40 KB) so edits show on reload without a restart."""
+    return PAGE_FILE.read_text(encoding="utf-8").encode("utf-8")
 
 
 class VizServer:
@@ -84,9 +92,18 @@ def _make_handler(server: VizServer):
 
         def do_GET(self) -> None:
             if self.path == "/":
-                self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+                self._send(200, page(), "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._json(server.streamer.state())
+            elif self.path == "/api/anatomy":
+                atlas = server.streamer.session.atlas
+                self._json(atlas.to_dict() if atlas is not None else {"n": 0})
+            elif self.path == "/api/anatomy/meshes":
+                assets = server.streamer.session.assets
+                self._json(assets.meshes_dict() if assets else {"rois": []})
+            elif self.path == "/api/anatomy/skeletons":
+                s = server.streamer.session
+                self._json(s.assets.skeletons_dict(s.atlas) if s.assets and s.atlas else {"neurons": []})
             elif self.path == "/api/stream":
                 self._stream()
             else:

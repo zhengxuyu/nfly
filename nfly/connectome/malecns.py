@@ -69,6 +69,9 @@ ANNOTATION_COLUMNS = {"bodyId": "root_id", "superclass": "super_class", "class":
                       "exitNerve": "exit_nerve"}
 HEX_COLUMNS = {"assignedOlHex1": "hex1", "assignedOlHex2": "hex2"}
 NO_HEX = np.float32(-1)
+POSITION_COLUMN = "somaLocation"     # [x, y, z] in 8 nm voxels of the MaleCNS EM space
+VOXEL_NM = 8.0
+CACHE_VERSION = 2                    # bump when the neuron table gains columns
 
 
 def flow_of(superclass: pd.Series) -> pd.Series:
@@ -87,7 +90,19 @@ def _read_annotations(data_dir: Path) -> pd.DataFrame:
     df["flow"] = flow_of(df["super_class"])
     for src, dst in HEX_COLUMNS.items():
         df[dst] = ann[src].fillna(NO_HEX).astype(np.float32).to_numpy() if src in ann.columns else NO_HEX
+    df[["x", "y", "z"]] = _soma_xyz_um(ann)
     return df
+
+
+def _soma_xyz_um(ann: pd.DataFrame) -> np.ndarray:
+    """Soma position per neuron in micrometres, NaN where the release has none (sensory neurons
+    whose somata lie outside the imaged volume)."""
+    xyz = np.full((len(ann), 3), np.nan, dtype=np.float32)
+    if POSITION_COLUMN in ann.columns:
+        loc = ann[POSITION_COLUMN]
+        ok = loc.map(lambda v: v is not None and len(v) == 3).to_numpy()
+        xyz[ok] = np.stack(loc[ok].to_numpy()).astype(np.float32) * (VOXEL_NM / 1000.0)
+    return xyz
 
 
 def _read_transmitters(data_dir: Path) -> pd.DataFrame:
@@ -157,7 +172,7 @@ def load_malecns(data_dir: str | Path = "data", cache: bool = True, min_syn: int
                  sign_map: dict[str, float] | None = None) -> Connectome:
     """Parse the MaleCNS release (or a cached .pt) into a Connectome; `min_syn` drops weak pairs."""
     data_dir = Path(data_dir)
-    cache_path = data_dir / "cache" / f"malecns_min{min_syn}.pt"
+    cache_path = data_dir / "cache" / f"malecns_min{min_syn}_v{CACHE_VERSION}.pt"
     if cache and cache_path.exists():
         log.info("loading cached connectome from %s", cache_path)
         return Connectome.load(cache_path)

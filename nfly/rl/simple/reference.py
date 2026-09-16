@@ -6,6 +6,8 @@ the same code path and the fly does not, the problem is in the model, not the tr
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import gymnasium as gym
 import numpy as np
 import torch
@@ -17,13 +19,18 @@ from ...interface.decoders import ActionDecoder
 class MLPReference(nn.Module):
     """Stateless MLP policy exposing initial_state / forward / act / decoder like FlyAgent."""
 
-    def __init__(self, obs_space: gym.Space, act_space: gym.Space, hidden: int = 64):
+    def __init__(self, obs_space: gym.Space, act_space: gym.Space, hidden: int | Sequence[int] = 64):
+        """hidden: one width for two equal layers (the CartPole reference), or the widths of each
+        layer, e.g. (600, 64) to match the fly's parameter count on 2 x 84 x 84 frames."""
         super().__init__()
-        d = int(np.prod(obs_space.shape))
-        self.body = nn.Sequential(nn.Flatten(), nn.Linear(d, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh())
-        self.decoder = ActionDecoder.for_space(_Stub(hidden), act_space, readout_idx=torch.arange(hidden), readout_dim=None)
+        widths = [hidden, hidden] if isinstance(hidden, int) else list(hidden)
+        layers, d = [nn.Flatten()], int(np.prod(obs_space.shape))
+        for w in widths:
+            layers += [nn.Linear(d, w), nn.Tanh()]; d = w
+        self.body = nn.Sequential(*layers)
+        self.decoder = ActionDecoder.for_space(_Stub(d), act_space, readout_idx=torch.arange(d), readout_dim=None)
         self.decoder.norm = nn.Identity()
-        self.value = nn.Linear(hidden, 1)
+        self.value = nn.Linear(d, 1)
 
     def initial_state(self, batch: int) -> torch.Tensor:
         return torch.zeros(batch, 0, device=self.value.weight.device)
