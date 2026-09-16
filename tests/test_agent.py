@@ -371,3 +371,14 @@ def test_shared_trunk_value_loss_trains_the_policy_hidden_layer():
     value.sum().backward()
     assert a.decoder.head[0].weight.grad is not None and a.decoder.head[0].weight.grad.abs().sum() > 0
     assert a.decoder.head[-1].weight.grad is None                     # the logits layer is the policy's alone
+
+
+def test_pixel_critic_reads_the_observation_not_the_readout():
+    c = visual_connectome()
+    space = gym.spaces.Box(0, 1, (2, 84, 84), np.float32)
+    a = FlyAgent.build(c, space, gym.spaces.Discrete(4), critic="pixels")
+    obs = torch.rand(3, 2, 84, 84)
+    dist, value, _ = a(obs, a.initial_state(3))
+    assert value.shape == (3,) and dist.probs.shape == (3, 4)
+    value.sum().backward()
+    assert a.value.net[0][0].weight.grad is not None and a.decoder.head.weight.grad is None

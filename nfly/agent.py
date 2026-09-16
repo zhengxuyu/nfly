@@ -25,6 +25,26 @@ def _is_image(space: gym.Space) -> bool:
     return isinstance(space, gym.spaces.Box) and len(space.shape) in (2, 3) and min(space.shape[-2:]) >= 8
 
 
+class PixelCritic(nn.Module):
+    """A small CNN over the observation for the value function only (asymmetric actor-critic).
+
+    The actor stays the wiring plus one readout; at test time the critic is not used. It exists
+    because a critic on the frozen readout explained none of the return on Pong, which left the
+    policy gradient without a direction (ablation, section 16)."""
+
+    def __init__(self, obs_shape: tuple[int, ...]):
+        super().__init__()
+        c, h, w = (obs_shape if len(obs_shape) == 3 else (1, *obs_shape))
+        conv = nn.Sequential(nn.Conv2d(c, 16, 8, stride=4), nn.ReLU(), nn.Conv2d(16, 32, 4, stride=2), nn.ReLU(), nn.Flatten())
+        with torch.no_grad():
+            n = conv(torch.zeros(1, c, h, w)).shape[1]
+        self.net = nn.Sequential(conv, nn.Linear(n, 128), nn.ReLU(), nn.Linear(128, 1))
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        x = obs.float()
+        return self.net(x.unsqueeze(1) if x.dim() == 3 else x)
+
+
 def value_head(n_features: int, hidden: int = 64) -> nn.Module:
     """A small tanh MLP critic. The policy stays linear on the readout, so this changes nothing
     about how the fly acts; it only gives training a value function that can fit the task
@@ -64,27 +84,35 @@ class FlyAgent(nn.Module):
     (R^2 0.8-0.93) and a linear probe imitates the policy at 88%."""
 
     def __init__(self, brain: ConnectomeRNN, encoder: ObservationEncoder, decoder: ActionDecoder,
-                 rnn_steps: int = 4, input_gain: float = 5.0, share_trunk: bool = False):
+                 rnn_steps: int = 4, input_gain: float = 5.0, share_trunk: bool = False, critic: str = "readout"):
         super().__init__()
         self.brain, self.encoder, self.decoder = brain, encoder, decoder
         self.rnn_steps = rnn_steps
         self.input_gain = nn.Parameter(torch.tensor(float(input_gain)))
         self.share_trunk = share_trunk          # critic on the policy head's hidden layer, so the value loss trains it too
+        self.critic = critic                    # "readout" (default) or "pixels": PixelCritic on the observation
+        self.obs_shape = tuple(encoder.space.shape) if hasattr(encoder, "space") else None
         self.value = self._new_value_head()
         self.register_buffer("h_rest", torch.zeros(brain.n))    # resting state; episodes start here
 
     def _new_value_head(self) -> nn.Module:
+        if self.critic == "pixels":
+            if self.obs_shape is None:
+                raise ValueError("critic='pixels' needs an image observation")
+            return PixelCritic(self.obs_shape)
         return value_head(self.decoder.trunk_dim if self.share_trunk else self.decoder.n_features)
 
-    def _value_input(self, feats: torch.Tensor) -> torch.Tensor:
-        return self.decoder.trunk(feats) if self.share_trunk else feats
+    def _value(self, feats: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
+        if self.critic == "pixels":
+            return self.value(obs)
+        return self.value(self.decoder.trunk(feats) if self.share_trunk else feats)
 
     @classmethod
     def build(cls, conn: Connectome, obs_space: gym.Space, act_space: gym.Space, rnn_steps: int = 4,
               input_gain: float = 5.0, alpha_init: float = 0.7, global_scale: float = 1.0, bias_init: float = 0.1,
               encoder: ObservationEncoder | None = None, decoder: ActionDecoder | None = None,
               readout_idx: torch.Tensor | None = None, readout_dim: int | None = None, head_hidden: int = 0,
-              share_trunk: bool = False,
+              share_trunk: bool = False, critic: str = "readout",
               encoder_kw: dict | None = None, **rnn_kw) -> "FlyAgent":
         """readout_dim: width of the readout bottleneck; None picks 32 for vector observations
         (calibrated to reconstruct the observation) and 128 for images (calibrated to reconstruct
@@ -96,7 +124,7 @@ class FlyAgent(nn.Module):
         brain = ConnectomeRNN(conn, alpha_init=alpha_init, global_scale=global_scale, bias_init=bias_init, **rnn_kw)
         enc = encoder or ObservationEncoder.for_space(conn, obs_space, **(encoder_kw or {}))
         dec = decoder or ActionDecoder.for_space(conn, act_space, readout_idx, readout_dim, head_hidden)
-        agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain, share_trunk=share_trunk)
+        agent = cls(brain, enc, dec, rnn_steps=rnn_steps, input_gain=input_gain, share_trunk=share_trunk, critic=critic)
         agent.calibrate(obs_space)
         return agent
 
@@ -231,7 +259,7 @@ class FlyAgent(nn.Module):
     def forward(self, obs: torch.Tensor, h: torch.Tensor, weights: Weights | None = None):
         """Returns (action distribution, value (B,), new h)."""
         feats, h = self.step(obs, h, weights)
-        return self.decoder.distribution(feats), self.value(self._value_input(feats)).squeeze(-1), h
+        return self.decoder.distribution(feats), self._value(feats, obs).squeeze(-1), h
 
     def act(self, obs, h, greedy: bool = False):
         """Convenience for evaluation: returns (env action, new h)."""
