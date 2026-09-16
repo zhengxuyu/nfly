@@ -27,7 +27,8 @@ Z_CLIP = 4.0
 
 def stage_of(neurons) -> np.ndarray:
     """Coarse processing stage of every neuron (index into STAGES), from superclass and type."""
-    sc, ct, flow = neurons["super_class"].to_numpy(), neurons["cell_type"].astype(str).to_numpy(), neurons["flow"].to_numpy()
+    sc, flow = neurons["super_class"].to_numpy(), neurons["flow"].to_numpy()
+    ct = neurons["cell_type"].fillna("").astype(str).to_numpy()
     stage = np.full(len(neurons), STAGES.index("VNC / motor"), dtype=np.int8)
     stage[flow == "afferent"] = STAGES.index("other sensory")
     stage[sc == "ol_sensory"] = STAGES.index("photoreceptors")
@@ -42,7 +43,7 @@ def stage_of(neurons) -> np.ndarray:
 
 
 def _starts_with(types: np.ndarray, prefixes: tuple[str, ...]) -> np.ndarray:
-    return np.array([t.startswith(prefixes) for t in types], dtype=bool)
+    return np.array([str(t).startswith(prefixes) for t in types], dtype=bool)
 
 
 def neuron_positions(conn: Connectome, passes: int = 3) -> np.ndarray:

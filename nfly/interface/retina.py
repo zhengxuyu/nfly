@@ -34,8 +34,13 @@ class RetinaLayout:
 
 
 def hex_to_xy(h1: np.ndarray, h2: np.ndarray) -> np.ndarray:
-    """Axial hex coordinates -> 2-D positions (unit column spacing)."""
-    return np.stack([h1 + 0.5 * h2, h2 * math.sqrt(3) / 2], axis=1)
+    """MaleCNS hex column coordinates -> 2-D positions (unit column spacing).
+
+    The two hex axes of `assignedOlHex1/2` meet at 120 degrees, so the shear is h1 - h2 / 2:
+    with it an eye's columns fill 80% of their bounding box with no correlation between x and
+    y (a round eye); with the other sign they form a diagonal band (correlation 0.8, 46% fill)
+    that the frame mapping stretches into two triangles, seen in the viewer's eye panel."""
+    return np.stack([h1 - 0.5 * h2, h2 * math.sqrt(3) / 2], axis=1)
 
 
 def column_layout(conn: Connectome) -> RetinaLayout:

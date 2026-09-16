@@ -410,6 +410,23 @@ features the head is trying to read. That is a candidate cause for the CartPole 
 lottery (section 9) and for part of the Pong failure; v9 and the CartPole seeds should be
 rerun with the fix before any further model changes.
 
+## 14. The viewer finds a distorted eye
+
+**Observation.** The new viewer panel that draws every photoreceptor at the position where it
+samples the frame showed each eye covering a triangle, not an oval: the left eye the lower-left
+half of the frame, the right eye the lower-right, the top strip sampled by almost nothing.
+
+**Cause.** `hex_to_xy` turned the MaleCNS hex column coordinates into plane positions with the
+shear x = h1 + h2 / 2. For the release's axes the sign is the other way: with + the columns of
+one eye form a diagonal band (x-y correlation 0.80, filling 46% of the bounding box), which the
+per-eye bounding-box normalisation stretches into two triangles; with x = h1 - h2 / 2 the
+correlation is 0.03 and the fill 80%, a round eye.
+
+**Fix.** The sign. Photoreceptor sampling positions change for every image task, so the retina
+sweep (section 11), the probes, v9 and the behaviour-cloning results (section 12) were all
+obtained with the distorted eye and are due for a rerun. The other findings (readout floor,
+normalisation drift, brain sensitivity) do not depend on where the eye samples.
+
 ## What is settled and what is open
 
 Settled:
@@ -437,6 +454,7 @@ Open:
 - Take-off on CartPole is not fixed by entropy 0.01 (seeds 1, 2 stayed at 20-44) or by 64 envs
   (seed 1 stayed at 20).
 - RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.
+- Rerun the retina sweep, v9 and the Pong behaviour cloning with the round eye (section 14).
 - The encoder is fixed apart from one global gain; a learnable version (input, surround and
   temporal gains, possibly a gain per photoreceptor, geometry still fixed) is untried.
 - What the optic lobe contributes beyond transmission is still unmeasured; section 12 shows
