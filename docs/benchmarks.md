@@ -62,6 +62,26 @@ To add a row, run one of the training commands in the README, read the last log 
 trainers) or the last `{"iter": ...}` line (RLlib), and record the config, env steps, return
 and entropy.
 
+## Compute and energy against an equal-parameter MLP
+
+`scripts/benchmark_cost.py`, Pong observation (2 x 84 x 84), batch 16 envs, unroll 32 steps
+(the trainer's segment), server CPU while three GPU jobs were also stepping envs:
+
+| Model | Trainable parameters | Multiply-adds per frame | Rollout ms / env step | Replay (fwd + bwd) ms / env step |
+| --- | --- | --- | --- | --- |
+| fly, `visual` sub-network | 8,847,598 | 33.6M | 147.6 | 526.7 |
+| MLP (600, 64) on the flattened frame | 8,506,719 | 8.5M | 4.2 | 9.2 |
+
+Same parameter count, 4x the arithmetic, 35 to 57x the time: the fly's cost is a sparse
+gather and scatter over 8.4M edges four times per frame, which is bound by memory bandwidth,
+while the MLP is two dense matrix products. In training on the GPU the same gap shows as 44
+versus 148 env steps per second. GPU joules per env step are measured by the same script
+when the card has room (it needs about 2 GB free).
+
+The equal-parameter MLP trained through the same simple PPO (lr 2.5e-4, otherwise the v9
+settings) stays at -20.4 after 330k steps with entropy 1.5: on raw pixels an MLP has no
+better inductive bias than the fly, and the CNN's convolutions are what solve Pong quickly.
+
 ## Throughput
 
 | Scenario | CPU (M-series laptop) | RTX 5090 |

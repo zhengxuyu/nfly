@@ -153,6 +153,27 @@ one weighted vote, so a trained agent's competence is the connectome's. The MLP 
 diagnostic control standing in for the ventral nerve cord; the critic exists only for training;
 the baselines (`MLPReference`, `scripts/baseline_cnn_pong.py`) have no brain at all.
 
+## What is new here, and what is not
+
+New:
+
+- The complete MaleCNS v1.0 wiring (166,700 neurons, 10.5M synapses, fixed signs from the
+  predicted transmitters) as one trainable, calibratable network behind the Gym protocol, with
+  the same training, probing and viewing tools for any task.
+- A sufficiency result: the frozen, untrained wiring plus one supervised readout plays Pong at
+  the level of a trained CNN (+19 / +20 in two of three episodes, [docs/benchmarks.md](docs/benchmarks.md)),
+  so the real connectome transmits what the task needs from the eye to the descending neurons.
+- Stage-by-stage linear probes and a viewer that follows a signal from photoreceptors to
+  descending neurons and down to the responding cell types, on the release's own anatomy.
+
+Not new, measured honestly: at equal parameter count the fly is not cheaper and does not score
+higher than a conventional network. Its 8.4M-edge sparse product costs 4x the arithmetic of an
+8.5M-parameter MLP and 35 to 57x the CPU time per env step (the product is memory-bound), and
+by reinforcement learning neither the fly nor that MLP has learned Pong from pixels, where a CNN
+reaches +19 in 356k steps. Whether the wiring buys sample efficiency, transfer or robustness is
+untested. The claim is a platform for asking those questions on real wiring, not a better
+controller.
+
 ## Benchmarks
 
 Recorded as they are, including negative results; full tables and throughput numbers in
@@ -162,7 +183,7 @@ Recorded as they are, including negative results; full tables and throughput num
 | Task | Conventional model | Fly, reinforcement learning | Fly, frozen + supervised head |
 | --- | --- | --- | --- |
 | CartPole-v1 (max 500) | MLP, simple PPO: 174 at 100k steps | linear head, simple PPO: peak 228 at 97k steps, oscillating; about one seed in three takes off | linear head cloned from a heuristic: 500 / 500 |
-| Pong (max +21) | CNN, RLlib PPO: +19 at 356k steps | -20.5 after up to 916k steps (v7-v9) | MLP head cloned from the CNN: +8.0 (episodes 19, 20, -15); linear head -9.7 |
+| Pong (max +21) | CNN, RLlib PPO: +19 at 356k steps; 8.5M-parameter MLP on pixels: -20.4 at 330k steps | -20.5 after up to 916k steps (v7-v9); from a cloned MLP head: -14 to -16 after 200k steps | MLP head cloned from the CNN: +8.0 (episodes 19, 20, -15); linear head -9.7 |
 
 The connectome transmits what both tasks need to the descending neurons; on Pong, RL has not
 yet found the head that supervision finds in 6,000 steps.
