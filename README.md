@@ -190,7 +190,8 @@ Recorded as they are, including negative results; full tables and throughput num
 
 The connectome transmits what both tasks need to the descending neurons; on Pong, supervision
 finds a head that plays close to the human reference (14.6) on the frozen wiring, while RL has
-not found one.
+not found one: its critic explains none of the return, so the policy gradient it follows is
+statistically indistinguishable from noise (ablation, section 16).
 
 ## Roadmap
 

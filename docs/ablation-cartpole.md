@@ -483,6 +483,47 @@ representation, not what the representation lacks. Next: more DAgger rounds seed
 head for the losing start, the linear head through the same procedure (the model's claim), and
 then PPO from the DAgger head with a KL guard and a dense shaping reward.
 
+## 16. Why RL fails where supervision works: the advantage is noise
+
+**Experiment.** `scripts/grad_align.py` at the DAgger head (section 15): 8 envs x 256 steps of
+the sampled policy (entropy 1.0), keeping readout features, actions, the critic's values,
+rewards and the CNN teacher's label per step. On 32 random minibatches of 256 the gradient on
+the head's parameters is computed three ways and compared with the supervised cross-entropy
+gradient towards the teacher: cosine similarity per batch, cosine of the batch means, and the
+signal-to-noise ratio across batches (norm of the mean gradient over the mean norm of the
+deviations).
+
+Data: 26 nonzero rewards in 2,048 steps, teacher agreement 51%, **critic explained variance
+0.001**.
+
+| Gradient on the head | cos with supervised (per batch) | cos of batch means | SNR |
+| --- | --- | --- | --- |
+| supervised (cross-entropy to the teacher) | 1.000 | 1.000 | 0.78 |
+| policy gradient, GAE with the fly's critic (what PPO follows) | 0.052 | -0.002 | 0.41 |
+| oracle advantage: +1 if the action is the teacher's, else -1 | 0.667 | 0.778 | 0.83 |
+| random advantage (noise floor) | 0.027 | 0.087 | 0.45 |
+
+**Result.** What PPO follows is indistinguishable from the random-advantage control. With a
+perfect advantage the same head, features and estimator point where supervision points (cos
+0.67 to 0.78, SNR above the supervised gradient's). The representation and the policy head are
+not the problem; the advantage estimate is, and it is broken because the critic, a separate
+MLP on the frozen readout, explains nothing of the return under 1 reward per 80 steps.
+
+**Why the CNN learns.** In the CNN actor-critic the policy and value heads share the
+convolutional trunk, and the value regression is a dense signal at every step. The trunk is
+shaped by that signal, the critic becomes informative, and the actor's gradient acquires a
+direction. On the fly, the trunk is frozen and the two heads are separate, so the only dense
+signal in RL never reaches what the policy reads. The equal-parameter MLP baseline has the
+same separation and the same failure.
+
+**Consequences.** Two fixes follow directly and are cheap: (a) `--share-trunk`, the critic on
+the policy head's hidden layer so the value loss trains it; (b) a privileged critic during
+training (the ALE RAM state, or a small CNN on pixels), which makes the advantage informative
+without touching the fly. Both keep the agent's policy "wiring plus one readout" at test time.
+Reward shaping (ball to paddle distance) attacks the sparsity itself. The linear head is a
+separate limit: DAgger with a linear readout stays at -19 (fit accuracy 69%), so Pong's policy
+is not linearly readable from the descending neurons; the MLP head's 64 units are needed.
+
 ## What is settled and what is open
 
 Settled:
