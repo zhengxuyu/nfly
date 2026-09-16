@@ -290,6 +290,7 @@
       const sx = (v.x + 1) / 2 * rect.width, sy = (1 - v.y) / 2 * rect.height, d = (sx - mx) ** 2 + (sy - my) ** 2;
       if (d < bestD) { bestD = d; best = i; }
     }
+    console.log('[nfly] pick at', mx.toFixed(0), my.toFixed(0), 'best', best, 'd', Math.sqrt(bestD).toFixed(1));
     state.picked = best;
     showPicked();
   }

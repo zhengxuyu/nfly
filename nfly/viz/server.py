@@ -21,7 +21,12 @@ from importlib import resources
 from .session import Session, SessionConfig, build_session
 from .streamer import Broadcast, EpisodeStreamer
 
-PAGE = resources.files(__package__).joinpath("static/index.html").read_text(encoding="utf-8")
+PAGE_FILE = resources.files(__package__).joinpath("static/index.html")
+
+
+def page() -> bytes:
+    """Read the page on every request (it is 40 KB) so edits show on reload without a restart."""
+    return PAGE_FILE.read_text(encoding="utf-8").encode("utf-8")
 
 
 class VizServer:
@@ -87,7 +92,7 @@ def _make_handler(server: VizServer):
 
         def do_GET(self) -> None:
             if self.path == "/":
-                self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+                self._send(200, page(), "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._json(server.streamer.state())
             elif self.path == "/api/anatomy":

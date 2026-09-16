@@ -17,14 +17,17 @@ descending neurons), which shows where a signal such as the ball's position is l
 from __future__ import annotations
 
 import argparse
+import inspect
 
 import numpy as np
 import torch
 
 from nfly import FlyAgent
+from nfly.interface import RetinaEncoder
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrate_on, connectome_from_args
 from nfly.suite import get_suite
 
+RETINA_DEFAULTS = {k: v.default for k, v in inspect.signature(RetinaEncoder.__init__).parameters.items() if k in ("temporal_gain", "surround")}
 PONG_RAM = {"ball x": 49, "ball y": 54, "player paddle y": 51, "cpu paddle y": 50}
 
 # Successive stages of the fly visual pathway, by MaleCNS cell type / superclass.
@@ -84,8 +87,8 @@ def main() -> None:
     p.add_argument("--steps", type=int, default=1500)
     p.add_argument("--layers", action="store_true", help="also probe successive stages of the visual pathway")
     p.add_argument("--alpha", type=float, default=0.7, help="leak per network step")
-    p.add_argument("--temporal-gain", type=float, default=4.0, help="retina: weight of the change channel")
-    p.add_argument("--surround", type=float, default=0.0, help="retina: weight of the centre-surround term")
+    p.add_argument("--temporal-gain", type=float, default=RETINA_DEFAULTS["temporal_gain"], help="retina: weight of the change channel")
+    p.add_argument("--surround", type=float, default=RETINA_DEFAULTS["surround"], help="retina: weight of the centre-surround term")
     p.add_argument("--full-field", action="store_true", help="retina: both eyes see the whole frame instead of one half each")
     p.add_argument("--no-fill-frame", action="store_true", help="retina: keep each eye an oval instead of warping it onto the frame")
     p.add_argument("--input-gain", type=float, default=5.0, help="initial input gain")
