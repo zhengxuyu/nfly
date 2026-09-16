@@ -67,8 +67,25 @@ def photoreceptor_layout(conn: Connectome) -> RetinaLayout:
     return RetinaLayout(per_pr.index.to_numpy(), side, xy)
 
 
-def eye_grid(layout: RetinaLayout, split: bool = False, mirror_left: bool = True) -> np.ndarray:
-    """Per-eye normalised image coordinates in [-1, 1]^2 (grid_sample convention)."""
+def disc_to_square(uv: np.ndarray) -> np.ndarray:
+    """Elliptical-grid mapping (Fong) from the unit disc to the unit square, so a round eye's
+    field of view fills a rectangular frame; points outside the disc are pulled onto its rim."""
+    r = np.linalg.norm(uv, axis=1, keepdims=True)
+    uv = np.where(r > 1, uv / np.maximum(r, 1e-6), uv)
+    u, v = uv[:, 0], uv[:, 1]
+    s2 = np.sqrt(2.0)
+    def half(a, b):                                  # the square coordinate along a, given the other one b
+        t = 2 + a * a - b * b
+        return 0.5 * np.sqrt(np.maximum(t + 2 * s2 * a, 0)) - 0.5 * np.sqrt(np.maximum(t - 2 * s2 * a, 0))
+    return np.clip(np.stack([half(u, v), half(v, u)], axis=1), -1, 1)
+
+
+def eye_grid(layout: RetinaLayout, split: bool = False, mirror_left: bool = True, fill_frame: bool = True) -> np.ndarray:
+    """Per-eye normalised image coordinates in [-1, 1]^2 (grid_sample convention).
+
+    fill_frame warps each eye's oval onto the whole rectangle: without it the two eyes sample
+    85% of the frame but only about 55% of its edges and corners, where Pong's paddles and
+    wall bounces are."""
     xy = hex_to_xy(layout.hex_xy[:, 0], layout.hex_xy[:, 1])
     uv = np.zeros_like(xy)
     for eye in EYES:
@@ -77,6 +94,8 @@ def eye_grid(layout: RetinaLayout, split: bool = False, mirror_left: bool = True
             continue
         lo, hi = xy[m].min(0), xy[m].max(0)
         u = (xy[m] - lo) / np.maximum(hi - lo, 1e-6)
+        if fill_frame:
+            u = (disc_to_square(u * 2 - 1) + 1) / 2
         if eye == "L" and mirror_left:
             u[:, 0] = 1 - u[:, 0]
         if split:                                   # left eye sees the left half of the frame
@@ -88,14 +107,14 @@ def eye_grid(layout: RetinaLayout, split: bool = False, mirror_left: bool = True
 class Retina(nn.Module):
     """Samples frames at the retina positions.  encode(frames (B,H,W)) -> contrast drive (B,K)."""
 
-    def __init__(self, layout: RetinaLayout, split: bool = False, mirror_left: bool = True):
+    def __init__(self, layout: RetinaLayout, split: bool = False, mirror_left: bool = True, fill_frame: bool = True):
         """split=True gives each eye one half of the frame (the fly's hemifields); the default
         lets both eyes sample the whole frame, doubling the sampling density on small objects
         (Pong ball position at the descending neurons: R^2 0.72 split, 0.86 full-field)."""
         super().__init__()
         self.side = layout.side
         self.register_buffer("idx", torch.as_tensor(np.array(layout.idx), dtype=torch.long))
-        grid = torch.as_tensor(eye_grid(layout, split, mirror_left), dtype=torch.float32)
+        grid = torch.as_tensor(eye_grid(layout, split, mirror_left, fill_frame), dtype=torch.float32)
         self.register_buffer("grid", grid.view(1, 1, -1, 2))
 
     @property

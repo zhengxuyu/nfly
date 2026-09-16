@@ -427,6 +427,20 @@ sweep (section 11), the probes, v9 and the behaviour-cloning results (section 12
 obtained with the distorted eye and are due for a rerun. The other findings (readout floor,
 normalisation drift, brain sensitivity) do not depend on where the eye samples.
 
+**Second look.** With the round eye the panel showed the remaining gap: an oval on a rectangle.
+Measured on an 84x84 frame (a pixel counts as seen if a photoreceptor samples within 2 px):
+
+| Eye mapping | whole frame | paddle columns (outer 12%) | top / bottom 12% |
+| --- | --- | --- | --- |
+| round eye, bounding box to frame | 85% | 59% | 54% |
+| round eye warped onto the square (`fill_frame`, elliptical-grid mapping) | 98% | 92% | 94% |
+
+Pong's paddles live in the outer columns and the ball turns at the top and bottom walls, so
+the first row means the eye barely saw the events that decide a point. `fill_frame=True` is
+now the default; it is a deliberate distortion of the eye's field of view onto the game frame,
+documented in docs/design.md. The 5,494 photoreceptors occupy 1,633 distinct positions (the
+R1-R8 of one ommatidium share a column), unchanged by the warp.
+
 ## What is settled and what is open
 
 Settled:

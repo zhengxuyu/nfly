@@ -40,6 +40,10 @@
   #timeline { width: 100%; height: 56px; display: block; background: #12151b; border-radius: 4px; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; color: var(--dim); font-size: 12px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .chip { background: none; border: 1px solid transparent; padding: 2px 6px; color: var(--dim); font-size: 12px; }
+  .chip.on { color: var(--fg); border-color: var(--line); }
+  .chip:not(.on) i { opacity: .25; }
+  .chip:not(.on) { text-decoration: line-through; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   td, th { padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--line); }
   th { color: var(--dim); font-weight: normal; }
@@ -148,7 +152,10 @@
   }
 
   // ---- 3-D brain ------------------------------------------------------------------------------
-  const brain = { ready: false, neuropils: null, skeletons: null, skel: null, hidePointsOf: null };
+  // one point set and one line set per processing stage, so a stage can be toggled by visibility
+  const brain = { ready: false, neuropils: null, skel: null, stagePoints: [], stageLines: [], stageOn: [] };
+  const toScene = (x, y, z) => [x - brain.centre[0], -(y - brain.centre[1]), z - brain.centre[2]];
+
   function initBrain(a) {
     const canvas = $('brain');
     if (typeof THREE === 'undefined') { $('hud').textContent = '3-D view needs three.js (CDN unreachable)'; return; }
@@ -156,40 +163,57 @@
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(40, 1, 1, 100000);
-    const n = a.n, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    const n = a.n;
     let cx = 0, cy = 0, cz = 0;
     for (let i = 0; i < n; i++) { cx += a.xyz[3 * i]; cy += a.xyz[3 * i + 1]; cz += a.xyz[3 * i + 2]; }
-    cx /= n; cy /= n; cz /= n;
-    let radius = 0;
-    for (let i = 0; i < n; i++) {
-      const x = a.xyz[3 * i] - cx, y = -(a.xyz[3 * i + 1] - cy), z = a.xyz[3 * i + 2] - cz;   // EM y points ventral: flip so dorsal is up
-      pos[3 * i] = x; pos[3 * i + 1] = y; pos[3 * i + 2] = z;
-      radius = Math.max(radius, Math.hypot(x, y, z));
-    }
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    brain.centre = [cx / n, cy / n, cz / n];
+    // group atlas indices by stage: slot[i] = position of neuron i inside its stage's arrays
+    const counts = a.counts, slot = new Int32Array(n), fill = new Int32Array(a.stages.length);
+    for (let i = 0; i < n; i++) slot[i] = fill[a.stage[i]]++;
     const mat = new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.95 });
-    const points = new THREE.Points(geom, mat);
-    scene.add(points);
-    const stageRGB = a.colors.map(hex);
-    Object.assign(brain, { renderer, scene, camera, geom, col, mat, points, radius, stageRGB, theta: 0.6, phi: 1.2, dist: radius * 2.6, ready: true, centre: [cx, cy, cz] });
+    let radius = 0;
+    brain.stagePoints = a.stages.map((_, st) => {
+      const pos = new Float32Array(counts[st] * 3), col = new Float32Array(counts[st] * 3);
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const pts = new THREE.Points(g, mat); scene.add(pts); return { pts, col, pos, hidden: new Uint8Array(counts[st]) };
+    });
+    for (let i = 0; i < n; i++) {
+      const q = toScene(a.xyz[3 * i], a.xyz[3 * i + 1], a.xyz[3 * i + 2]);
+      brain.stagePoints[a.stage[i]].pos.set(q, 3 * slot[i]);
+      radius = Math.max(radius, Math.hypot(q[0], q[1], q[2]));
+    }
+    brain.stageOn = a.stages.map(() => true);
+    Object.assign(brain, { renderer, scene, camera, mat, radius, slot, stageRGB: a.colors.map(hex), theta: 0.6, phi: 1.2, dist: radius * 2.6, ready: true });
     paintCloud(null);
     loadOfficial().catch(e => console.warn('official anatomy not loaded', e));
-    // orbit: drag rotates, wheel zooms
     let drag = null;
     canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; state.rotate = false; $('btnRotate').classList.remove('on'); });
     window.addEventListener('pointermove', e => { if (!drag) return; brain.theta += (e.clientX - drag.x) * 0.006; brain.phi = Math.min(3.0, Math.max(0.15, brain.phi - (e.clientY - drag.y) * 0.006)); drag = { x: e.clientX, y: e.clientY }; });
     window.addEventListener('pointerup', () => { drag = null; });
     canvas.addEventListener('wheel', e => { e.preventDefault(); brain.dist = Math.min(radius * 8, Math.max(radius * 0.4, brain.dist * (1 + Math.sign(e.deltaY) * 0.08))); }, { passive: false });
     $('psize').oninput = e => { mat.size = +e.target.value; };
-    $('stageLegend').innerHTML = a.stages.map((s, i) => `<span><i style="background:${a.colors[i]}"></i>${s} (${a.counts[i].toLocaleString()})</span>`).join('');
-    $('hud').innerHTML = `<b>${n.toLocaleString()}</b> neurons at their MaleCNS soma positions (our rendering of the release's coordinates; neurons without a soma are placed at their partners)`;
+    buildStageLegend(a);
+    $('hud').innerHTML = `<b>${n.toLocaleString()}</b> neurons at their MaleCNS soma positions`;
     requestAnimationFrame(renderBrain);
   }
 
-  // official MaleCNS anatomy: neuropil meshes as translucent shells, skeletons as lines coloured by activity
-  const toScene = (x, y, z) => [x - brain.centre[0], -(y - brain.centre[1]), z - brain.centre[2]];
+  function buildStageLegend(a) {
+    $('stageLegend').innerHTML = a.stages.map((s, i) => `<button class="chip on" id="stage${i}" title="click to show / hide this stage"><i style="background:${a.colors[i]}"></i>${s} (${a.counts[i].toLocaleString()})</button>`).join('');
+    a.stages.forEach((_, i) => { $('stage' + i).onclick = () => toggleStage(i); });
+  }
+
+  function toggleStage(i) {
+    brain.stageOn[i] = !brain.stageOn[i];
+    $('stage' + i).classList.toggle('on', brain.stageOn[i]);
+    applyStageVisibility();
+  }
+
+  function applyStageVisibility() {
+    const somata = $('btnPoints').classList.contains('on'), skel = $('btnSkeletons').classList.contains('on');
+    brain.stagePoints.forEach((p, i) => { p.pts.visible = somata && brain.stageOn[i]; });
+    brain.stageLines.forEach((l, i) => { if (l) l.visible = skel && brain.stageOn[i]; });
+  }
+
   async function loadOfficial() {
     const m = await (await fetch('/api/anatomy/meshes')).json();
     if (m.rois && m.rois.length) {
@@ -197,8 +221,8 @@
       let faces = 0;
       for (const roi of m.rois) {
         const v = b64(roi.vertices, Float32Array), f = b64(roi.faces, Uint32Array), pos = new Float32Array(v.length);
-        for (let i = 0; i < v.length; i += 3) { const q = toScene(v[i], v[i + 1], v[i + 2]); pos[i] = q[0]; pos[i + 1] = q[1]; pos[i + 2] = q[2]; }
-        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(f, 1)); g.computeVertexNormals();
+        for (let i = 0; i < v.length; i += 3) pos.set(toScene(v[i], v[i + 1], v[i + 2]), i);
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(f, 1));
         const colour = roi.region === 'vnc' ? 0x4f8f7f : 0x6f7fb0;
         group.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false })));
         faces += f.length / 3;
@@ -208,26 +232,30 @@
     }
     const k = await (await fetch('/api/anatomy/skeletons')).json();
     if (k.neurons && k.neurons.length) {
-      let nseg = 0; for (const n of k.neurons) { const par = b64(n.parent, Int32Array); for (let i = 0; i < par.length; i++) if (par[i] >= 0) nseg++; }
-      const pos = new Float32Array(nseg * 6), col = new Float32Array(nseg * 6), owner = new Int32Array(nseg), atlasOf = [], stageOf = [];
-      let s = 0;
-      k.neurons.forEach((n, j) => {
-        const xyz = b64(n.xyz, Float32Array), par = b64(n.parent, Int32Array);
-        atlasOf.push(n.atlas); stageOf.push(n.stage);
-        for (let i = 0; i < par.length; i++) {
-          if (par[i] < 0) continue;
-          const a = toScene(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]), b = toScene(xyz[3 * par[i]], xyz[3 * par[i] + 1], xyz[3 * par[i] + 2]);
-          pos.set([a[0], a[1], a[2], b[0], b[1], b[2]], 6 * s); owner[s] = j; s++;
+      const a = state.atlas, perStage = a.stages.map(() => ({ segs: [], owner: [] }));
+      const neurons = k.neurons.map(n => ({ atlas: n.atlas, stage: n.stage, xyz: b64(n.xyz, Float32Array), parent: b64(n.parent, Int32Array) }));
+      neurons.forEach((n, j) => {
+        const bucket = perStage[n.stage];
+        for (let i = 0; i < n.parent.length; i++) {
+          if (n.parent[i] < 0) continue;
+          bucket.segs.push(...toScene(n.xyz[3 * i], n.xyz[3 * i + 1], n.xyz[3 * i + 2]), ...toScene(n.xyz[3 * n.parent[i]], n.xyz[3 * n.parent[i] + 1], n.xyz[3 * n.parent[i] + 2]));
+          bucket.owner.push(j);
         }
+        if (n.atlas >= 0) brain.stagePoints[n.stage].hidden[brain.slot[n.atlas]] = 1;    // its soma point is redundant now
       });
-      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
-      brain.scene.add(lines); brain.skeletons = lines; brain.skel = { col, owner, atlasOf, stageOf, n: k.neurons.length };
-      brain.hidePointsOf = new Uint8Array(state.atlas.n); for (const i of atlasOf) if (i >= 0) brain.hidePointsOf[i] = 1;
+      brain.stageLines = perStage.map(b => {
+        if (!b.segs.length) return null;
+        const pos = new Float32Array(b.segs), col = new Float32Array(pos.length);
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+        brain.scene.add(lines); return Object.assign(lines, { owner: b.owner, col });
+      });
+      brain.skel = { neurons };
       $('btnSkeletons').hidden = false;
       brain.hudSkel = `${k.neurons.length} official skeletons`;
     }
     $('hud').innerHTML = `<b>${state.atlas.n.toLocaleString()}</b> neurons at their MaleCNS soma positions` + (brain.hudMeshes ? ` | ${brain.hudMeshes}` : '') + (brain.hudSkel ? ` | ${brain.hudSkel}` : '');
+    applyStageVisibility();
     paintCloud(state.lastCloud);
   }
 
@@ -238,31 +266,32 @@
   }
 
   function paintSkeletons(u8) {
-    const k = brain.skel; if (!k) return;
-    const a = state.atlas, rgb = brain.stageRGB, colours = [];
-    for (let j = 0; j < k.n; j++) {
-      const s = rgb[k.stageOf[j]], ai = k.atlasOf[j];
-      const v = (u8 && ai >= 0) ? (u8[ai] - 128) / 127 : 0;
-      colours.push(state.anatomyMode || !u8 ? [s[0], s[1], s[2]] : activityRGB(v, s, 0.45));
+    if (!brain.skel) return;
+    const rgb = brain.stageRGB;
+    const colours = brain.skel.neurons.map(n => {
+      const s = rgb[n.stage], v = (u8 && n.atlas >= 0) ? (u8[n.atlas] - 128) / 127 : 0;
+      return state.anatomyMode || !u8 ? [s[0], s[1], s[2]] : activityRGB(v, s, 0.45);
+    });
+    for (const l of brain.stageLines) {
+      if (!l) continue;
+      for (let i = 0; i < l.owner.length; i++) { const c = colours[l.owner[i]]; l.col.set(c, 6 * i); l.col.set(c, 6 * i + 3); }
+      l.geometry.attributes.color.needsUpdate = true;
     }
-    const col = k.col;
-    for (let i = 0; i < k.owner.length; i++) { const c = colours[k.owner[i]]; col.set(c, 6 * i); col.set(c, 6 * i + 3); }
-    brain.skeletons.geometry.attributes.color.needsUpdate = true;
   }
 
   function paintCloud(u8) {
     if (!brain.ready) return;
     paintSkeletons(u8);
-    const a = state.atlas, col = brain.col, rgb = brain.stageRGB;
-    const hide = brain.skeletons && brain.skeletons.visible ? brain.hidePointsOf : null;
+    const a = state.atlas, rgb = brain.stageRGB, skel = brain.skel && $('btnSkeletons').classList.contains('on');
     for (let i = 0; i < a.n; i++) {
-      const s = rgb[a.stage[i]];
-      if (hide && hide[i]) { col[3 * i] = col[3 * i + 1] = col[3 * i + 2] = 0; continue; }
-      if (state.anatomyMode || !u8) { const d = state.anatomyMode ? 1 : 0.28; col[3 * i] = s[0] * d; col[3 * i + 1] = s[1] * d; col[3 * i + 2] = s[2] * d; continue; }
-      const c = activityRGB((u8[i] - 128) / 127, s, 0.22);
-      col[3 * i] = c[0]; col[3 * i + 1] = c[1]; col[3 * i + 2] = c[2];
+      const st = a.stage[i], sp = brain.stagePoints[st], k = brain.slot[i], s = rgb[st];
+      let c;
+      if (skel && sp.hidden[k]) c = [0, 0, 0];
+      else if (state.anatomyMode || !u8) { const d = state.anatomyMode ? 1 : 0.28; c = [s[0] * d, s[1] * d, s[2] * d]; }
+      else c = activityRGB((u8[i] - 128) / 127, s, 0.22);
+      sp.col.set(c, 3 * k);
     }
-    brain.geom.attributes.color.needsUpdate = true;
+    for (const sp of brain.stagePoints) sp.pts.geometry.attributes.color.needsUpdate = true;
   }
 
   function renderBrain() {
@@ -352,8 +381,8 @@
   $('btnRotate').onclick = () => { state.rotate = !state.rotate; $('btnRotate').classList.toggle('on', state.rotate); };
   $('btnAnatomy').onclick = () => { state.anatomyMode = !state.anatomyMode; $('btnAnatomy').classList.toggle('on', state.anatomyMode); paintCloud(state.lastCloud); };
   $('btnNeuropils').onclick = () => { if (!brain.neuropils) return; brain.neuropils.visible = !brain.neuropils.visible; $('btnNeuropils').classList.toggle('on', brain.neuropils.visible); };
-  $('btnSkeletons').onclick = () => { if (!brain.skeletons) return; brain.skeletons.visible = !brain.skeletons.visible; $('btnSkeletons').classList.toggle('on', brain.skeletons.visible); paintCloud(state.lastCloud); };
-  $('btnPoints').onclick = () => { if (!brain.points) return; brain.points.visible = !brain.points.visible; $('btnPoints').classList.toggle('on', brain.points.visible); };
+  $('btnSkeletons').onclick = () => { $('btnSkeletons').classList.toggle('on'); applyStageVisibility(); paintCloud(state.lastCloud); };
+  $('btnPoints').onclick = () => { $('btnPoints').classList.toggle('on'); applyStageVisibility(); };
 
   async function loadAtlas() {
     const a = await (await fetch('/api/anatomy')).json();

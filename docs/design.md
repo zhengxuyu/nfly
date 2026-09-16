@@ -63,7 +63,10 @@ u = gain * ( sample(frame) + surround * sample(frame - local_mean) + temporal_ga
 with surround 4 over a 9x9 neighbourhood and temporal gain 8 by default. Both eyes sample the
 whole frame (`split=True` gives each eye its half). The hex axes of `assignedOlHex1/2` meet at
 120 degrees, so plane positions are x = h1 - h2 / 2, y = h2 * sqrt(3) / 2; the viewer's eye
-panel shows the resulting mosaic, which should look like a round eye (ablation, section 14). Centre-surround and temporal contrast are
+panel shows the resulting mosaic, which should look like a round eye (ablation, section 14).
+Because the frame is a rectangle, each eye's oval is warped onto the full frame by the
+elliptical-grid disc-to-square mapping (`fill_frame`, default on): without it the eyes sample
+85% of the frame but only about 55% of its edges and corners; with it 98% and over 90%. Centre-surround and temporal contrast are
 computations the fly's lamina performs; they live in the encoder because the probe sweep
 (ablation, section 11) showed each adds about 0.1 R^2 of ball position at the descending
 neurons. Nothing in the encoder is learnable except the global input gain, so it cannot turn
