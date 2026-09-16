@@ -20,30 +20,38 @@ def default_readout_nodes(conn: Connectome) -> torch.Tensor:
 
 
 class ReadoutNorm(nn.Module):
-    """Per-neuron standardisation with learnable mean and scale, calibrated once at build time.
+    """Per-neuron standardisation: calibrated statistics, plus a learnable shift and gain in
+    standardised units.
 
     Readout neurons sit on a large, nearly constant resting pattern; the observation-dependent
     part of their activity is orders of magnitude smaller. Subtracting each neuron's typical
     activity and dividing by its typical spread removes the pattern, so the heads (and their
-    gradients) see the part that carries information. `calibrate` sets both from a probe of
-    activities; afterwards they train like any parameter, which keeps every forward pass
-    deterministic (no running statistics to drift between rollout, replay and target copies)."""
+    gradients) see the part that carries information. `calibrate` sets `mean` and `scale` from
+    a probe of activities and they stay fixed; training moves `shift` and `log_gain`, which are
+    measured in standard deviations, so an optimizer step of 1e-3 is 1e-3 of a spread. (When the
+    raw mean itself was the parameter, one Adam step of 1e-3 was many spreads of a descending
+    neuron's activity, saturated the features and turned the policy deterministic in one
+    update.) No running statistics, so every forward pass is deterministic."""
 
     def __init__(self, n: int, min_std: float = 1e-4, clip: float = 10.0):
         super().__init__()
         self.min_std, self.clip = min_std, clip
-        self.mean = nn.Parameter(torch.zeros(n))
-        self.log_scale = nn.Parameter(torch.zeros(n))
+        self.register_buffer("mean", torch.zeros(n))
+        self.register_buffer("scale", torch.ones(n))
+        self.shift = nn.Parameter(torch.zeros(n))
+        self.log_gain = nn.Parameter(torch.zeros(n))
 
     @torch.no_grad()
     def calibrate(self, activity: torch.Tensor) -> None:
         """activity: (M, n) readout activities from a probe of observations."""
         flat = activity.reshape(-1, activity.shape[-1])
         self.mean.copy_(flat.mean(0))
-        self.log_scale.copy_(torch.log(flat.std(0).clamp_min(self.min_std)))
+        self.scale.copy_(flat.std(0).clamp_min(self.min_std))
+        self.shift.zero_(); self.log_gain.zero_()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return ((x - self.mean) * torch.exp(-self.log_scale)).clamp(-self.clip, self.clip)
+        z = (x - self.mean) / self.scale
+        return ((z - self.shift) * torch.exp(self.log_gain)).clamp(-self.clip, self.clip)
 
 
 class ActionDecoder(nn.Module):

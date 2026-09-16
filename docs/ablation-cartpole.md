@@ -347,6 +347,41 @@ The natural next steps are on the RL side: initialise the head from behaviour cl
 PPO continue (DAgger-style), or shape the reward with the ball-paddle distance, before touching
 the brain again.
 
+## 13. PPO from the cloned head: the readout normalisation was never trainable at that rate
+
+**Experiment.** `train_rl.py --init` starts PPO (v9 settings) from the behaviour-cloned heads of
+section 12, logits tempered to 1.0 nats so the sampled policy can still move (sampled play:
+linear -18.7, MLP -5.3).
+
+**Result.** Update 1 had KL 722 (linear) and 7.3 (MLP); entropy went to 0.000 and 0.005 and the
+gradient to zero. Both runs were dead after one update. The tempering changed nothing (fitted
+logits were already at 1.2 / 0.8 nats), so the cause was not over-confident logits.
+
+Four-update diagnostics with the same linear checkpoint:
+
+| Trainable | KL at update 1 | Entropy after |
+| --- | --- | --- |
+| everything (default) | 722 | 0.000 |
+| brain frozen (`--freeze-brain`) | 719 | 0.000 |
+| brain lr x 0.001 | 720 | 0.000 |
+| heads only (`--heads-only`) | 0.000 | 0.99 (unchanged) |
+
+Neither the brain nor the heads: what remained trainable in the second row was the encoder's
+input gain and the readout normalisation's per-neuron `mean` and `log_scale`, in the "rest"
+group at the full lr 1e-3. A descending neuron's activity spread is far below 1e-3 in raw
+units, so one Adam step on `mean` moved every feature by many standard deviations, the
+features saturated at the clip, and the linear head's logits went with them.
+
+**Fix.** `ReadoutNorm` keeps the calibrated `mean` and `scale` as fixed buffers and trains a
+per-neuron `shift` and `log_gain` in standardised units, both zero after calibration; a step
+of 1e-3 is now 1e-3 of a spread. Old checkpoints do not load (different state keys).
+
+**Consequence for the earlier rows.** Every RL run since v2 had these parameters drifting at
+lr 1e-3 under a zero-initialised head, where the drift is invisible in KL but still moves the
+features the head is trying to read. That is a candidate cause for the CartPole take-off
+lottery (section 9) and for part of the Pong failure; v9 and the CartPole seeds should be
+rerun with the fix before any further model changes.
+
 ## What is settled and what is open
 
 Settled:
@@ -368,8 +403,9 @@ Settled by v6:
 Open:
 - Take-off: only about one seed in three learns CartPole at all (section 9).
 - Pong, RL: no run has left -20.5 (v7-v9, up to 916k steps), although the readout is
-  sufficient (section 12). Credit assignment is the open problem; behaviour-cloned
-  initialisation or reward shaping are the untried levers.
+  sufficient (section 12). Those runs, and the CartPole seeds, trained the readout
+  normalisation at a rate that saturates the features (section 13); rerun with the fix, then
+  behaviour-cloned initialisation or reward shaping if they still fail.
 - Take-off on CartPole is not fixed by entropy 0.01 (seeds 1, 2 stayed at 20-44) or by 64 envs
   (seed 1 stayed at 20).
 - RLlib APPO collapses even with per-group learning rates; a KL guard is needed there.

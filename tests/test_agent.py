@@ -147,6 +147,7 @@ def test_agent_build_calibrates_readout():
     c = visual_connectome()
     a = FlyAgent.build(c, gym.spaces.Box(0, 1, (84, 84), np.float32), gym.spaces.Discrete(4))
     assert not torch.all(a.decoder.norm.mean == 0)      # calibrated, not the default zeros
+    assert torch.all(a.decoder.norm.shift == 0)         # training offsets start at zero
     h = a.initial_state(6)
     for _ in range(40):                                  # features stay in range well after the reset transient
         feats, h = a.step(torch.rand(6, 84, 84), h)
