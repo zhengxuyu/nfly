@@ -27,7 +27,7 @@ from bc_pong import CNNTeacher, fit_head, mean_entropy, play, temper_head  # noq
 
 from nfly import FlyAgent  # noqa: E402
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrate_on, connectome_from_args  # noqa: E402
-from nfly.rl.simple.common import save_checkpoint  # noqa: E402
+from nfly.rl.simple.common import load_checkpoint, save_checkpoint  # noqa: E402
 from nfly.suite import get_suite  # noqa: E402
 
 
@@ -63,6 +63,7 @@ def main() -> None:
     p.add_argument("--fit-steps", type=int, default=3000)
     p.add_argument("--episodes", type=int, default=5, help="greedy evaluation episodes per round")
     p.add_argument("--entropy-target", type=float, default=1.0, help="temper the saved head's logits to this entropy for RL")
+    p.add_argument("--init", help="start from the head in this checkpoint (e.g. an earlier DAgger run)")
     p.add_argument("--out", required=True)
     args = p.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -71,13 +72,15 @@ def main() -> None:
     env = get_suite("atari").make("pong", seed=args.seed)
     agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device).eval()
     calibrate_on(agent, get_suite("atari").make("pong", seed=args.seed + 1000))
+    if args.init:
+        load_checkpoint(agent, args.init)
     teacher = CNNTeacher(args.teacher, args.device)
     head = agent.decoder.head
     n_actions = env.action_space.n
 
     F_all, A_all, best = None, None, -float("inf")
     for rnd in range(args.rounds):
-        F, A = record(env, agent, teacher, args.steps_per_round, args.device, act_with_student=rnd > 0,
+        F, A = record(env, agent, teacher, args.steps_per_round, args.device, act_with_student=rnd > 0 or bool(args.init),
                       noise=args.noise, seed=args.seed + 10 * rnd)
         F_all = F if F_all is None else torch.cat([F_all, F]); A_all = A if A_all is None else torch.cat([A_all, A])
         fit_head(head, F_all, A_all, args.fit_steps)
