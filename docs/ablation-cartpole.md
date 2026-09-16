@@ -436,7 +436,17 @@ Measured on an 84x84 frame (a pixel counts as seen if a photoreceptor samples wi
 | round eye warped onto the square (`fill_frame`, elliptical-grid mapping) | 98% | 92% | 94% |
 
 Pong's paddles live in the outer columns and the ball turns at the top and bottom walls, so
-the first row means the eye barely saw the events that decide a point. `fill_frame=True` is
+the first row means the eye barely saw the events that decide a point. The readout probe
+agrees (frozen network, held-out R^2 at the descending neurons, same retina settings for both
+rows: temporal gain 4, no surround):
+
+| Eye mapping | ball x | ball y | player paddle y | cpu paddle y |
+| --- | --- | --- | --- | --- |
+| round eye, oval on the frame | 0.20 | 0.65 | 0.74 | 0.49 |
+| round eye warped onto the square | 0.23 | 0.72 | 0.75 | 0.81 |
+
+The CPU paddle, in the far column, is the target the oval lost; ball x, never decodable with
+the distorted eye, is now weakly present at both settings. `fill_frame=True` is
 now the default; it is a deliberate distortion of the eye's field of view onto the game frame,
 documented in docs/design.md. The 5,494 photoreceptors occupy 1,633 distinct positions (the
 R1-R8 of one ommatidium share a column), unchanged by the warp.
