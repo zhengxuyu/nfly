@@ -65,3 +65,20 @@ def add_agent_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--split-eyes", action="store_true", help="retina: each eye sees its half of the frame at double density (default: both eyes see the whole frame)")
     p.add_argument("--device", default="cpu")
     p.add_argument("--seed", type=int, default=0)
+
+
+def rescale_policy(agent, temperature: float) -> None:
+    """Set an explicit starting temperature without changing the greedy discrete policy."""
+    import torch
+    from .interface import DiscreteDecoder
+    if temperature <= 0:
+        raise ValueError("Initial policy temperature must be positive")
+    if temperature == 1.0:
+        return
+    if not isinstance(agent.decoder, DiscreteDecoder):
+        raise ValueError("Initial policy temperature requires discrete actions")
+    head = agent.decoder.head
+    last = head[-1] if isinstance(head, torch.nn.Sequential) else head
+    with torch.no_grad():
+        last.weight.div_(temperature)
+        last.bias.div_(temperature)

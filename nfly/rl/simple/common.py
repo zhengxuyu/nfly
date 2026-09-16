@@ -38,12 +38,34 @@ class Rollout:
     h0: torch.Tensor   # (n_envs, N) hidden state at the start of the segment
     boot: torch.Tensor # (n_envs,) value estimate after the last step
     returns: list[float]
+    timeouts: list[torch.Tensor] = dataclasses.field(default_factory=list)
+    distributions: list = dataclasses.field(default_factory=list)
+
+
+def reset_state(agent, h: torch.Tensor, done: torch.Tensor) -> torch.Tensor:
+    """Use the same episode initial condition in collection, replay and evaluation."""
+    return torch.where(done.bool().unsqueeze(1), agent.initial_state(h.shape[0]), h)
+
+
+def timeout_values(agent, h, term, trunc, info, device):
+    """Bootstrap time limits from the final observation, before SAME_STEP autoreset."""
+    values = torch.zeros(len(term), device=device)
+    idx = np.flatnonzero(np.asarray(trunc) & ~np.asarray(term))
+    if len(idx):
+        final = info.get("final_obs", info.get("final_observation"))
+        if final is None:
+            raise ValueError("Time-limit bootstrap requires final observations (SAME_STEP autoreset)")
+        x = torch.as_tensor(np.stack([final[i] for i in idx]), device=device)
+        _, v, _ = agent(x, h[idx])
+        values[idx] = v
+    return values
 
 
 def collect(agent, venv, obs, h, steps: int, device, clip_reward: bool) -> tuple[Rollout, np.ndarray, torch.Tensor]:
     """Run the agent for `steps` env steps, returning the rollout, the last obs and the last h."""
     h0 = h.detach()
     obs_l, act_l, rew_l, done_l, logp_l, val_l, returns = [], [], [], [], [], [], []
+    timeouts, distributions = [], []
     with torch.no_grad():
         for _ in range(steps):
             obs_l.append(np.asarray(obs))
@@ -53,10 +75,12 @@ def collect(agent, venv, obs, h, steps: int, device, clip_reward: bool) -> tuple
             d = torch.as_tensor(np.logical_or(term, trunc), dtype=torch.float32, device=device)
             act_l.append(a); logp_l.append(dist.log_prob(a)); val_l.append(value); done_l.append(d)
             rew_l.append(torch.as_tensor(np.sign(r) if clip_reward else r, dtype=torch.float32, device=device))
-            h = h * (1 - d).unsqueeze(1)                           # reset finished episodes
+            timeouts.append(timeout_values(agent, h, term, trunc, info, device))
+            distributions.append(dist)
+            h = reset_state(agent, h, d)
             returns.extend(finished_returns(info))
         _, boot, _ = agent(torch.as_tensor(np.asarray(obs), device=device), h)
-    return Rollout(obs_l, act_l, rew_l, done_l, logp_l, val_l, h0, boot, returns), obs, h
+    return Rollout(obs_l, act_l, rew_l, done_l, logp_l, val_l, h0, boot, returns, timeouts, distributions), obs, h
 
 
 def gae(ro: Rollout, gamma: float, lam: float) -> tuple[torch.Tensor, torch.Tensor]:
@@ -67,25 +91,40 @@ def gae(ro: Rollout, gamma: float, lam: float) -> tuple[torch.Tensor, torch.Tens
     next_v = ro.boot
     for t in reversed(range(T)):
         nonterminal = 1 - ro.dones[t]
-        delta = ro.rewards[t] + gamma * next_v * nonterminal - ro.values[t]
+        timeout = ro.timeouts[t] if ro.timeouts else 0.0
+        delta = ro.rewards[t] + gamma * (next_v * nonterminal + timeout) - ro.values[t]
         last = delta + gamma * lam * nonterminal * last
         adv[t] = last
         next_v = ro.values[t]
     return adv, adv + torch.stack(ro.values)
 
 
-def replay(agent, ro: Rollout, env_idx: torch.Tensor, device):
-    """Re-run the agent over a rollout segment for a subset of envs (with gradients).
+def replay_steps(agent, ro: Rollout, env_idx: torch.Tensor, device):
+    """Yield distributions and values with the collection reset convention."""
+    h, weights = ro.h0[env_idx], agent.weights()
+    indices = env_idx.cpu().numpy()
+    for t, obs in enumerate(ro.obs):
+        dist, value, h = agent(torch.as_tensor(obs[indices], device=device), h, weights)
+        yield dist, value
+        h = reset_state(agent, h, ro.dones[t][env_idx])
 
-    Returns log-probs (T, b), entropies (T, b), values (T, b)."""
-    h = ro.h0[env_idx]
-    weights = agent.weights()
+
+def replay(agent, ro: Rollout, env_idx: torch.Tensor, device):
+    """Re-run an environment minibatch with gradients; return log-probs, entropy and values."""
     logps, ents, values = [], [], []
-    for t in range(len(ro.obs)):
-        dist, value, h = agent(torch.as_tensor(ro.obs[t][env_idx.cpu().numpy()], device=device), h, weights)
-        logps.append(dist.log_prob(ro.actions[t][env_idx])); ents.append(dist.entropy()); values.append(value)
-        h = h * (1 - ro.dones[t][env_idx]).unsqueeze(1)
+    for t, (dist, value) in enumerate(replay_steps(agent, ro, env_idx, device)):
+        logps.append(dist.log_prob(ro.actions[t][env_idx]))
+        ents.append(dist.entropy()); values.append(value)
     return torch.stack(logps), torch.stack(ents), torch.stack(values)
+
+
+@torch.no_grad()
+def policy_kl(agent, ro: Rollout, device) -> float:
+    """Exact distribution KL on the full rollout, evaluated after an optimizer step."""
+    idx = torch.arange(ro.h0.shape[0], device=device)
+    kls = [torch.distributions.kl_divergence(old, new).mean()
+           for old, (new, _) in zip(ro.distributions, replay_steps(agent, ro, idx, device))]
+    return float(torch.stack(kls).mean().clamp_min(0))
 
 
 class Tracker:

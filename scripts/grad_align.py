@@ -10,8 +10,8 @@ head's parameters:
 
     g_pg     the PPO / policy-gradient direction at ratio 1: -A * grad log pi(a), A from GAE
              with the fly's own critic (what training actually follows)
-    g_oracle the same with an oracle advantage: +1 if a is the teacher's action else -1
-             (what a perfect critic would give)
+    g_teacher the same with teacher agreement: +1 if a is the teacher's action else -1
+             (a supervision control, not the true Pong advantage)
     g_ce     the cross-entropy gradient towards the teacher's label (what DAgger follows)
 
 and report cosine similarities and the signal-to-noise ratio of each across minibatches
@@ -34,7 +34,7 @@ from bc_pong import CNNTeacher  # noqa: E402
 
 from nfly import FlyAgent  # noqa: E402
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrate_on, connectome_from_args  # noqa: E402
-from nfly.rl.simple.common import load_checkpoint  # noqa: E402
+from nfly.rl.simple.common import load_checkpoint, reset_state  # noqa: E402
 from nfly.suite import get_suite  # noqa: E402
 
 
@@ -61,7 +61,7 @@ def rollout(agent, envs, teacher, steps: int, device: str):
                     o, _ = e.reset(); stacks[i] = []
                 obs[i] = o
             R.append(torch.tensor(r, dtype=torch.float32, device=device)); D.append(torch.tensor(d, device=device))
-            h = h * (1 - D[-1]).unsqueeze(1)
+            h = reset_state(agent, h, D[-1])
         x = torch.as_tensor(np.stack([np.asarray(o) for o in obs]), device=device)
         f, _ = agent.step(x, h); boot = agent.value(f).squeeze(-1)
     return [torch.stack(t) for t in (F, A, LP, V, R, D, LAB)] + [boot]
@@ -112,11 +112,11 @@ def main() -> None:
     adv, v_target = gae(V, R, D, boot)
     ev = 1 - float((v_target - V).var() / v_target.var().clamp_min(1e-12))
     adv_n = (adv - adv.mean()) / (adv.std() + 1e-8)
-    oracle = torch.where(A == LAB, 1.0, -1.0)
+    teacher_agreement = torch.where(A == LAB, 1.0, -1.0)
     rand = torch.randn_like(adv_n)
     N = args.steps * args.envs
     F2, A2, LAB2 = F.reshape(N, -1), A.reshape(N), LAB.reshape(N)
-    advs = {"policy gradient (fly critic)": adv_n.reshape(N), "oracle advantage (teacher agrees)": oracle.reshape(N),
+    advs = {"policy gradient (fly critic)": adv_n.reshape(N), "teacher-agreement control": teacher_agreement.reshape(N),
             "random advantage (noise floor)": rand.reshape(N)}
     params = [q for q in agent.decoder.head.parameters()]
     print(f"{N} steps, rewards {int((R != 0).sum())} nonzero, teacher agreement {float((A == LAB).float().mean()):.1%}, "
