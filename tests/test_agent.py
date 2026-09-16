@@ -331,3 +331,32 @@ def test_checkpoint_roundtrip(tmp_path):
     extra = load_checkpoint(b, tmp_path / "a.pt")
     assert extra == {"note": "cloned"}
     assert torch.equal(b.decoder.head.weight, a.decoder.head.weight)
+
+
+def test_positions_and_stages_from_synthetic_release(tmp_path):
+    from nfly.connectome import load_malecns
+    from nfly.connectome.synthetic import write_synthetic
+    from nfly.viz.anatomy import STAGES, neuron_positions, stage_of
+    c = load_malecns(write_synthetic(tmp_path), cache=False)
+    assert {"x", "y", "z"} <= set(c.neurons.columns)
+    raw = c.neurons[["x", "y", "z"]].to_numpy()
+    photoreceptors = (c.neurons["super_class"] == "ol_sensory").to_numpy()
+    assert np.isnan(raw[photoreceptors, 0]).all() and not np.isnan(raw[~photoreceptors, 0]).any()
+    xyz = neuron_positions(c)
+    assert not np.isnan(xyz).any()                                   # photoreceptors placed at their targets
+    stage = stage_of(c.neurons)
+    assert (stage[photoreceptors] == STAGES.index("photoreceptors")).all()
+    assert (stage[(c.neurons["cell_type"] == "L1").to_numpy()] == STAGES.index("lamina")).all()
+
+
+def test_trace_matches_step():
+    c = visual_connectome()
+    env = get_suite("classic").make("cartpole")
+    a = FlyAgent.build(c, env.observation_space, env.action_space, rnn_steps=3)
+    obs = torch.as_tensor(env.reset(seed=0)[0]).float().unsqueeze(0)
+    h = a.initial_state(1)
+    states = a.trace(obs, h)
+    _, h2 = a.step(obs, h)
+    assert len(states) == 3 and torch.equal(states[-1], h2)
+    action, h3, dist, states2 = a.act_traced(obs, h, greedy=True)
+    assert torch.equal(h3, h2) and dist.probs.shape[-1] == env.action_space.n

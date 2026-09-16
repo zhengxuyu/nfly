@@ -67,3 +67,17 @@ Scripts share their argument groups through `nfly/cli.py` (`add_connectome_args`
 `add_agent_args`, `agent_kwargs`, `calibrate_on`, `apply_freezes`), so a new script gets the
 same `--subset`, `--rnn-steps`, `--readout-dim`, `--head-hidden`, `--freeze-brain` and
 `--device` flags by calling those.
+
+## Viewer
+
+`scripts/serve.py` (or `nfly.viz.serve(SessionConfig(...))`) starts a standard-library HTTP
+server: `GET /` is the page, `GET /api/state` the session and recent history, `GET /api/stream`
+a text/event-stream of step events, `POST /api/control` pause / resume / step / reset / fps.
+With a fly policy the session also builds a `BrainAtlas` (`GET /api/anatomy`): up to
+`--max-points` neurons at their MaleCNS soma positions (micrometres; neurons without a soma,
+such as photoreceptors, are placed at the synapse-weighted mean of their partners), their
+processing stage, and the photoreceptor sampling positions. Each step event then carries
+`brain.cloud` (one byte per drawn neuron: activity as a z-score against a random-policy
+rollout, 128 = resting), `brain.stages` (mean |z| per stage after every network sub-step,
+which the page animates as the signal travels from the eye to the descending neurons) and
+`brain.retina` (input current per photoreceptor). `--no-anatomy` turns this off.

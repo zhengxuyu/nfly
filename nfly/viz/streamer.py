@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 import torch
 
+from .anatomy import summarise
 from .session import Session
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class StepEvent:
     done: bool
     frame_jpeg_b64: str
     probs: list[float] | None       # action probabilities for discrete policies
+    brain: dict[str, Any] | None    # BrainActivity.to_dict() when the session has an atlas
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -140,8 +142,11 @@ class EpisodeStreamer(threading.Thread):
     def _one_step(self, obs, h):
         env, policy = self.session.env, self.session.policy
         obs_t = torch.as_tensor(np.asarray(obs)).unsqueeze(0)
-        probs = self._action_probs(obs_t, h)
-        action, h = policy.act(obs_t, h, greedy=self.session.config.greedy)
+        if self.session.atlas is not None:
+            action, h, probs, brain = self._fly_step(obs_t, h)
+        else:
+            probs, brain = self._action_probs(obs_t, h), None
+            action, h = policy.act(obs_t, h, greedy=self.session.config.greedy)
         a = action[0]
         obs, r, term, trunc, _ = env.step(a)
         a_val = int(a) if np.ndim(a) == 0 else [float(x) for x in np.asarray(a).ravel()]
@@ -150,11 +155,21 @@ class EpisodeStreamer(threading.Thread):
         with self._lock:                       # counters and history change together
             self.step_no += 1; self.episode_return += float(r)
             ev = StepEvent(self.step_no, self.episode, a_val, name, float(r), self.episode_return,
-                           bool(term or trunc), frame, probs).to_dict()
+                           bool(term or trunc), frame, probs, brain).to_dict()
             self.history.append({k: ev[k] for k in ("step", "episode", "action", "action_name", "reward")})
             del self.history[:-self.history_size]
         self.broadcast.publish(ev)
         return obs, h, bool(term or trunc)
+
+    def _fly_step(self, obs_t, h):
+        """One pass through the fly: action, probabilities and the activity of every sub-step."""
+        policy, session = self.session.policy, self.session
+        obs_t = obs_t.to(session.activity.mean.device)
+        action, h, dist, states = policy.act_traced(obs_t, h, greedy=session.config.greedy)
+        probs = dist.probs[0].tolist() if hasattr(dist, "probs") else None
+        with torch.no_grad():
+            brain = summarise(states, policy.drive(obs_t)[0], session.atlas, session.activity).to_dict()
+        return action, h, probs, brain
 
     def _action_probs(self, obs_t, h):
         policy = self.session.policy

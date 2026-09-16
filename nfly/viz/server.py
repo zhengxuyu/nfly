@@ -3,6 +3,7 @@ stream and a control endpoint.  No framework dependency, so it runs anywhere the
 
     GET  /                 the visualiser page
     GET  /api/state        session description + recent action history
+    GET  /api/anatomy      neuron positions, stages and photoreceptor layout for the 3-D view
     GET  /api/stream       text/event-stream of step events (frame, action, reward, probs)
     POST /api/control      {"cmd": "pause" | "resume" | "step" | "reset" | "fps", "fps": 15}
 """
@@ -87,6 +88,9 @@ def _make_handler(server: VizServer):
                 self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._json(server.streamer.state())
+            elif self.path == "/api/anatomy":
+                atlas = server.streamer.session.atlas
+                self._json(atlas.to_dict() if atlas is not None else {"n": 0})
             elif self.path == "/api/stream":
                 self._stream()
             else:

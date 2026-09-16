@@ -11,32 +11,42 @@
   header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
   header h1 { font-size: 16px; margin: 0; }
   header .meta { color: var(--dim); }
-  main { display: grid; grid-template-columns: minmax(420px, 2.2fr) minmax(300px, 1fr); gap: 16px; padding: 16px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  .stage { display: flex; justify-content: center; align-items: center; height: calc(100vh - 300px); min-height: 320px; }
+  main { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(420px, 1.6fr) minmax(280px, 0.9fr); gap: 16px; padding: 16px; }
+  @media (max-width: 1200px) { main { grid-template-columns: 1fr 1fr; } main > .brain { grid-column: 1 / -1; order: -1; } }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  .stage { display: flex; justify-content: center; align-items: center; height: 320px; }
   canvas#frame { max-width: 100%; max-height: 100%; width: auto; height: 100%; image-rendering: pixelated; background: #000; border-radius: 4px; }
+  canvas#retina { width: 100%; height: auto; display: block; background: #000; border-radius: 4px; image-rendering: pixelated; }
+  .brain .view { position: relative; height: calc(100vh - 220px); min-height: 420px; background: #0b0d12; border-radius: 6px; overflow: hidden; }
+  .brain canvas { display: block; width: 100%; height: 100%; }
+  .brain .hud { position: absolute; left: 10px; top: 8px; color: var(--dim); font-size: 12px; pointer-events: none; }
+  .brain .hud b { color: var(--fg); font-weight: normal; }
   .controls { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
   button { background: #222733; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
   button:hover { border-color: var(--acc); }
+  button.on { border-color: var(--acc); color: var(--acc); }
   input[type=range] { width: 120px; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
   .stat { background: #12151b; border-radius: 6px; padding: 8px; }
   .stat .k { color: var(--dim); font-size: 12px; }
   .stat .v { font-size: 18px; font-variant-numeric: tabular-nums; }
   h2 { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
-  .probs .row { display: grid; grid-template-columns: 90px 1fr 48px; gap: 8px; align-items: center; margin: 3px 0; }
-  .probs .bar { height: 10px; background: #12151b; border-radius: 5px; overflow: hidden; }
-  .probs .bar i { display: block; height: 100%; background: var(--acc); width: 0; transition: width .1s; }
+  .probs .row, .stages .row { display: grid; grid-template-columns: 110px 1fr 48px; gap: 8px; align-items: center; margin: 3px 0; }
+  .bar { height: 10px; background: #12151b; border-radius: 5px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--acc); width: 0; transition: width .08s; }
   .probs .row.chosen .name { color: var(--acc); }
+  .stages .name { font-size: 12px; }
   #timeline { width: 100%; height: 56px; display: block; background: #12151b; border-radius: 4px; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; color: var(--dim); font-size: 12px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   td, th { padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--line); }
   th { color: var(--dim); font-weight: normal; }
-  #log { max-height: 260px; overflow: auto; }
+  #log { max-height: 200px; overflow: auto; }
   .status { color: var(--dim); }
   .status.err { color: #ff7b72; }
+  .note { color: var(--dim); font-size: 12px; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -47,6 +57,7 @@
 </header>
 <main>
   <section class="panel">
+    <h2>Observation</h2>
     <div class="stage"><canvas id="frame" width="160" height="210"></canvas></div>
     <div class="controls">
       <button id="btnPause">Pause</button>
@@ -60,9 +71,26 @@
       <div class="stat"><div class="k">episode return</div><div class="v" id="sRet">0</div></div>
       <div class="stat"><div class="k">last reward</div><div class="v" id="sRew">0</div></div>
     </div>
+    <h2 style="margin-top:14px">Compound eyes: photoreceptor input current</h2>
+    <canvas id="retina" width="336" height="210"></canvas>
+    <div class="note" id="retinaNote">left eye | right eye; orange = depolarising current, blue = hyperpolarising (centre-surround and temporal contrast included)</div>
+  </section>
+  <section class="panel brain">
+    <h2>MaleCNS v1.0 brain: activity relative to rest (z-score per neuron)</h2>
+    <div class="view"><canvas id="brain"></canvas><div class="hud" id="hud">loading atlas...</div></div>
+    <div class="controls">
+      <button id="btnRotate" class="on">Auto-rotate</button>
+      <button id="btnAnatomy">Stage colours</button>
+      <label>point size <input type="range" id="psize" min="1" max="5" step="0.5" value="2"></label>
+      <span class="note">drag to orbit, wheel to zoom</span>
+    </div>
+    <div class="legend" id="stageLegend"></div>
   </section>
   <aside class="panel">
-    <h2>Action probabilities</h2>
+    <h2>Signal propagation within one frame (mean |z| per stage)</h2>
+    <div class="stages" id="stages"></div>
+    <div class="note" id="substep">network sub-step - / -</div>
+    <h2 style="margin-top:14px">Action probabilities</h2>
     <div class="probs" id="probs"></div>
     <h2 style="margin-top:14px">Action timeline (last 256 steps)</h2>
     <canvas id="timeline" width="600" height="56"></canvas>
@@ -71,34 +99,142 @@
     <div id="log"><table><thead><tr><th>step</th><th>action</th><th>reward</th></tr></thead><tbody id="logBody"></tbody></table></div>
   </aside>
 </main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
   const palette = ['#ffb454', '#59c2ff', '#aad94c', '#f07178', '#d2a6ff', '#95e6cb', '#f29e74', '#e6b450', '#73b8ff', '#ff8f40',
                    '#c2d94c', '#ffee99', '#7fd962', '#f28779', '#dfbfff', '#5ccfe6', '#ffcc66', '#bae67e', '#ff3333', '#a37acc'];
-  const state = { names: [], history: [], paused: false, fps: 15 };
+  const state = { names: [], history: [], paused: false, fps: 15, atlas: null, anatomyMode: false, rotate: true };
   const frame = $('frame'), fctx = frame.getContext('2d');
+  const retina = $('retina'), rctx = retina.getContext('2d');
   const tl = $('timeline'), tctx = tl.getContext('2d');
   const img = new Image();
+  let lastFrame = null;
+
+  const b64 = (s, T) => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return T === Uint8Array ? u : new T(u.buffer); };
+  const hex = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 
   function setStatus(msg, err) { const s = $('status'); s.textContent = msg; s.className = 'status' + (err ? ' err' : ''); }
 
-  function drawFrame(b64) {
-    img.onload = () => { if (frame.width !== img.width || frame.height !== img.height) { frame.width = img.width; frame.height = img.height; } fctx.drawImage(img, 0, 0); };
-    img.src = 'data:image/jpeg;base64,' + b64;
+  // ---- observation and retina ---------------------------------------------------------------
+  function drawFrame(b64jpeg) {
+    img.onload = () => {
+      if (frame.width !== img.width || frame.height !== img.height) { frame.width = img.width; frame.height = img.height; }
+      fctx.drawImage(img, 0, 0); lastFrame = img; drawRetina(state.lastRetina);
+    };
+    img.src = 'data:image/jpeg;base64,' + b64jpeg;
   }
 
+  function drawRetina(u8) {
+    const a = state.atlas; if (!a || !a.retina_xy.length) { rctx.fillStyle = '#000'; rctx.fillRect(0, 0, retina.width, retina.height); return; }
+    const w = 168, h = Math.round(w * (lastFrame ? lastFrame.height / lastFrame.width : 1.3));
+    if (retina.width !== 2 * w + 4 || retina.height !== h) { retina.width = 2 * w + 4; retina.height = h; }
+    rctx.fillStyle = '#000'; rctx.fillRect(0, 0, retina.width, retina.height);
+    for (const eye of [0, 1]) {
+      const ox = eye * (w + 4);
+      if (lastFrame) { rctx.globalAlpha = 0.35; rctx.drawImage(lastFrame, ox, 0, w, h); rctx.globalAlpha = 1; }
+      for (let k = 0; k < a.n_retina; k++) {
+        if (a.retina_eye[k] !== eye) continue;
+        const v = u8 ? (u8[k] - 128) / 127 : 0;
+        const x = ox + (a.retina_xy[2 * k] + 1) / 2 * w, y = (a.retina_xy[2 * k + 1] + 1) / 2 * h;
+        rctx.fillStyle = v >= 0 ? `rgba(255,180,84,${0.15 + 0.85 * v})` : `rgba(89,194,255,${0.15 - 0.85 * v})`;
+        rctx.fillRect(x - 1, y - 1, 2.2, 2.2);
+      }
+    }
+  }
+
+  // ---- 3-D brain ------------------------------------------------------------------------------
+  const brain = { ready: false };
+  function initBrain(a) {
+    const canvas = $('brain');
+    if (typeof THREE === 'undefined') { $('hud').textContent = '3-D view needs three.js (CDN unreachable)'; return; }
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(40, 1, 1, 100000);
+    const n = a.n, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < n; i++) { cx += a.xyz[3 * i]; cy += a.xyz[3 * i + 1]; cz += a.xyz[3 * i + 2]; }
+    cx /= n; cy /= n; cz /= n;
+    let radius = 0;
+    for (let i = 0; i < n; i++) {
+      const x = a.xyz[3 * i] - cx, y = -(a.xyz[3 * i + 1] - cy), z = a.xyz[3 * i + 2] - cz;   // EM y points ventral: flip so dorsal is up
+      pos[3 * i] = x; pos[3 * i + 1] = y; pos[3 * i + 2] = z;
+      radius = Math.max(radius, Math.hypot(x, y, z));
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.95 });
+    const points = new THREE.Points(geom, mat);
+    scene.add(points);
+    const stageRGB = a.colors.map(hex);
+    Object.assign(brain, { renderer, scene, camera, geom, col, mat, points, radius, stageRGB, theta: 0.6, phi: 1.2, dist: radius * 2.6, ready: true });
+    paintCloud(null);
+    // orbit: drag rotates, wheel zooms
+    let drag = null;
+    canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; state.rotate = false; $('btnRotate').classList.remove('on'); });
+    window.addEventListener('pointermove', e => { if (!drag) return; brain.theta += (e.clientX - drag.x) * 0.006; brain.phi = Math.min(3.0, Math.max(0.15, brain.phi - (e.clientY - drag.y) * 0.006)); drag = { x: e.clientX, y: e.clientY }; });
+    window.addEventListener('pointerup', () => { drag = null; });
+    canvas.addEventListener('wheel', e => { e.preventDefault(); brain.dist = Math.min(radius * 8, Math.max(radius * 0.4, brain.dist * (1 + Math.sign(e.deltaY) * 0.08))); }, { passive: false });
+    $('psize').oninput = e => { mat.size = +e.target.value; };
+    $('stageLegend').innerHTML = a.stages.map((s, i) => `<span><i style="background:${a.colors[i]}"></i>${s} (${a.counts[i].toLocaleString()})</span>`).join('');
+    $('hud').innerHTML = `<b>${n.toLocaleString()}</b> of the neurons drawn at their MaleCNS soma positions`;
+    requestAnimationFrame(renderBrain);
+  }
+
+  function paintCloud(u8) {
+    if (!brain.ready) return;
+    const a = state.atlas, col = brain.col, rgb = brain.stageRGB;
+    for (let i = 0; i < a.n; i++) {
+      const s = rgb[a.stage[i]];
+      if (state.anatomyMode || !u8) { const d = state.anatomyMode ? 1 : 0.28; col[3 * i] = s[0] * d; col[3 * i + 1] = s[1] * d; col[3 * i + 2] = s[2] * d; continue; }
+      const v = (u8[i] - 128) / 127, m = Math.min(1, Math.abs(v) * 1.5);
+      const r = v >= 0 ? 1.0 : 0.35, g = v >= 0 ? 0.70 : 0.76, b = v >= 0 ? 0.33 : 1.0;   // orange up, blue down
+      const d = 0.22;
+      col[3 * i] = s[0] * d * (1 - m) + r * m; col[3 * i + 1] = s[1] * d * (1 - m) + g * m; col[3 * i + 2] = s[2] * d * (1 - m) + b * m;
+    }
+    brain.geom.attributes.color.needsUpdate = true;
+  }
+
+  function renderBrain() {
+    const b = brain, canvas = b.renderer.domElement;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (canvas.width !== w * b.renderer.getPixelRatio() || canvas.height !== h * b.renderer.getPixelRatio()) { b.renderer.setSize(w, h, false); b.camera.aspect = w / h; b.camera.updateProjectionMatrix(); }
+    if (state.rotate) b.theta += 0.004;
+    b.camera.position.set(b.dist * Math.sin(b.phi) * Math.sin(b.theta), b.dist * Math.cos(b.phi), b.dist * Math.sin(b.phi) * Math.cos(b.theta));
+    b.camera.lookAt(0, 0, 0);
+    b.renderer.render(b.scene, b.camera);
+    requestAnimationFrame(renderBrain);
+  }
+
+  // ---- stage propagation ----------------------------------------------------------------------
+  let substepTimers = [];
+  function buildStages(a) {
+    $('stages').innerHTML = a.stages.map((s, i) =>
+      `<div class="row"><span class="name" style="color:${a.colors[i]}">${s}</span><div class="bar"><i id="st${i}" style="background:${a.colors[i]}"></i></div><span class="val" id="sv${i}">0.00</span></div>`).join('');
+  }
+  function showStages(vals, k, total) {
+    vals.forEach((v, i) => { const e = $('st' + i); if (!e) return; e.style.width = Math.min(100, v / 2 * 100) + '%'; $('sv' + i).textContent = v.toFixed(2); });
+    $('substep').textContent = `network sub-step ${k + 1} / ${total} (bar full scale: mean |z| = 2)`;
+  }
+  function animateStages(stages) {
+    substepTimers.forEach(clearTimeout); substepTimers = [];
+    const interval = 1000 / Math.max(1, state.fps);
+    stages.forEach((vals, k) => { substepTimers.push(setTimeout(() => showStages(vals, k, stages.length), k * interval / stages.length)); });
+  }
+
+  // ---- actions --------------------------------------------------------------------------------
   function buildProbs() {
     $('probs').innerHTML = state.names.map((n, i) =>
       `<div class="row" id="p${i}"><span class="name">${n}</span><div class="bar"><i style="background:${palette[i % palette.length]}"></i></div><span class="val">0.00</span></div>`).join('');
     $('legend').innerHTML = state.names.map((n, i) => `<span><i style="background:${palette[i % palette.length]}"></i>${n}</span>`).join('');
   }
-
   function drawProbs(probs, chosen) {
     if (!probs) return;
     probs.forEach((p, i) => { const r = $('p' + i); if (!r) return; r.querySelector('i').style.width = (p * 100) + '%'; r.querySelector('.val').textContent = p.toFixed(2); r.classList.toggle('chosen', i === chosen); });
   }
-
   function drawTimeline() {
     const w = tl.width = tl.clientWidth || 600, h = tl.height, n = 256;
     tctx.fillStyle = '#12151b'; tctx.fillRect(0, 0, w, h);
@@ -111,7 +247,6 @@
       if (e.reward < 0) { tctx.fillStyle = '#f07178'; tctx.fillRect(i * cw, h - 5, Math.max(cw, 1), 5); }
     });
   }
-
   function pushLog(e) {
     const tb = $('logBody');
     const tr = document.createElement('tr');
@@ -123,7 +258,12 @@
   function onEvent(e) {
     drawFrame(e.frame_jpeg_b64);
     drawProbs(e.probs, e.action);
-    state.history.push(e); if (state.history.length > 512) state.history.shift();
+    if (e.brain) {
+      state.lastRetina = b64(e.brain.retina, Uint8Array);
+      paintCloud(b64(e.brain.cloud, Uint8Array));
+      animateStages(e.brain.stages);
+    }
+    state.history.push({ step: e.step, action: e.action, reward: e.reward }); if (state.history.length > 512) state.history.shift();
     drawTimeline(); pushLog(e);
     $('sStep').textContent = e.step; $('sEp').textContent = e.episode;
     $('sRet').textContent = e.episode_return.toFixed(1); $('sRew').textContent = e.reward.toFixed(2);
@@ -133,6 +273,7 @@
     const r = await fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ cmd }, extra || {})) });
     const j = await r.json();
     if (j.paused !== undefined) { state.paused = j.paused; $('btnPause').textContent = state.paused ? 'Resume' : 'Pause'; }
+    if (j.fps !== undefined) state.fps = j.fps;
     return j;
   }
 
@@ -141,6 +282,17 @@
   $('btnReset').onclick = () => control('reset');
   $('fps').oninput = ev => { $('fpsv').textContent = ev.target.value; };
   $('fps').onchange = ev => control('fps', { fps: +ev.target.value });
+  $('btnRotate').onclick = () => { state.rotate = !state.rotate; $('btnRotate').classList.toggle('on', state.rotate); };
+  $('btnAnatomy').onclick = () => { state.anatomyMode = !state.anatomyMode; $('btnAnatomy').classList.toggle('on', state.anatomyMode); paintCloud(state.lastCloud); };
+
+  async function loadAtlas() {
+    const a = await (await fetch('/api/anatomy')).json();
+    if (!a.n) { $('hud').textContent = 'no brain in this session (random policy, or --no-anatomy)'; $('substep').textContent = ''; return; }
+    a.xyz = b64(a.xyz, Float32Array); a.stage = b64(a.stage, Uint8Array);
+    a.retina_xy = b64(a.retina_xy, Float32Array); a.retina_eye = b64(a.retina_eye, Uint8Array); a.n_retina = a.retina_eye.length;
+    state.atlas = a;
+    buildStages(a); initBrain(a); drawRetina(null);
+  }
 
   async function init() {
     const s = await (await fetch('/api/state')).json();
@@ -148,8 +300,9 @@
     $('meta').textContent = `${s.suite}/${s.game}  policy=${s.policy}${s.subset ? ' subset=' + s.subset : ''}${s.checkpoint ? ' ckpt=' + s.checkpoint : ''}`;
     $('fps').value = s.fps; $('fpsv').textContent = s.fps; $('btnPause').textContent = s.paused ? 'Resume' : 'Pause';
     buildProbs(); drawTimeline();
+    await loadAtlas();
     const es = new EventSource('/api/stream');
-    es.onmessage = m => { const e = JSON.parse(m.data); if (e.error) { setStatus('backend error: ' + e.error.split('\n').slice(-2).join(' '), true); return; } onEvent(e); };
+    es.onmessage = m => { const e = JSON.parse(m.data); if (e.error) { setStatus('backend error: ' + e.error.split('\n').slice(-2).join(' '), true); return; } if (e.brain) state.lastCloud = b64(e.brain.cloud, Uint8Array); onEvent(e); };
     if (s.error) setStatus('backend error: ' + s.error.split('\n').slice(-2).join(' '), true);
     es.onopen = () => setStatus('live');
     es.onerror = () => setStatus('stream disconnected, retrying', true);

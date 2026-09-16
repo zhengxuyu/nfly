@@ -25,10 +25,12 @@ def main() -> None:
     p.add_argument("--fps", type=float, default=15.0)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--no-anatomy", action="store_true", help="skip the 3-D brain activity stream")
+    p.add_argument("--max-points", type=int, default=30000, help="neurons drawn in the 3-D view")
     args = p.parse_args()
 
     fields = {f.name for f in dataclasses.fields(SessionConfig)}
-    cfg = SessionConfig(**{k: v for k, v in vars(args).items() if k in fields}, data_dir=args.data)
+    cfg = SessionConfig(**{k: v for k, v in vars(args).items() if k in fields}, data_dir=args.data, anatomy=not args.no_anatomy)
     server = serve(cfg, args.host, args.port)
     print(f"nfly viz: {server.url}  ({cfg.suite}/{cfg.game}, policy={cfg.policy})", flush=True)
     server.serve_forever()

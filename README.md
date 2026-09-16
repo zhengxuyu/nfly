@@ -56,7 +56,7 @@ under CC-BY 4.0. nfly uses three of its flat-connectome exports from the
 | **Fly network** | `nfly.connectome`, `nfly.brain` | MaleCNS v1.0 loader, named sub-networks, `ConnectomeRNN` (fixed wiring and signs, learnable per-edge gain, per-neuron leak and bias), stimulation experiments |
 | **Gym interface** | `nfly.interface`, `nfly.agent`, `nfly.suite` | Encoders / decoders chosen automatically from `observation_space` / `action_space`; `FlyAgent` recurrent policy; `GameSuite` base class with Atari, classic-control and generic-Gymnasium suites |
 | **RL infrastructure** | `nfly.rl.simple`, `nfly.rl.rllib` | Readable pure-PyTorch A2C / PPO for learning and quick experiments; Ray RLlib `FlyRLModule` + config builders (PPO / APPO / IMPALA) for producing models at scale |
-| **Viewer** | `nfly.viz` | Browser page streaming the rendered frame, action probabilities, action timeline and step log for any (policy, env) session, with pause / step / reset |
+| **Viewer** | `nfly.viz` | Browser page streaming the rendered frame, the photoreceptor input on both compound eyes, the whole brain as a 3-D point cloud at MaleCNS soma positions coloured by live activity, signal propagation stage by stage within each frame, action probabilities, action timeline and step log, with pause / step / reset |
 
 Everything is layered one way (`connectome -> brain -> interface -> agent -> suite -> rl / viz`);
 a new task, sense, or algorithm is a new subclass in its own layer ([docs/extending.md](docs/extending.md)).
@@ -97,7 +97,7 @@ uv run scripts/train_rl.py --algo ppo --suite atari --game pong --subset visual 
 uv run scripts/train_rllib.py --algo APPO --suite atari --game pong --subset visual \
     --env-runners 8 --envs-per-runner 2 --gpus 1 --train-batch 4096 --iters 2000 --out runs/rllib-pong
 
-# 3. watch it play at http://127.0.0.1:8000
+# 3. watch it play at http://127.0.0.1:8000 (frame, compound eyes, 3-D brain activity, action stream)
 uv run scripts/serve.py --suite atari --game pong --subset visual --checkpoint runs/ppo-atari-pong.pt
 
 # 4. swap the task: encoders and decoders are picked from the env's spaces, no model code changes

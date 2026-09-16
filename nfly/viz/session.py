@@ -14,6 +14,7 @@ from ..agent import FlyAgent
 from ..connectome import load_malecns, select_subset
 from ..rl.simple.common import load_checkpoint
 from ..suite import get_suite
+from .anatomy import ActivityScale, BrainAtlas, build_atlas, calibrate_activity
 
 
 @runtime_checkable
@@ -52,6 +53,8 @@ class SessionConfig:
     device: str = "cpu"
     seed: int = 0
     fps: float = 15.0              # playback speed of the stream
+    anatomy: bool = True           # stream brain activity for the 3-D view (fly policy only)
+    max_points: int = 30000        # neurons rendered in the 3-D view
 
 
 @dataclasses.dataclass
@@ -60,6 +63,8 @@ class Session:
     env: gym.Env
     policy: Policy
     action_names: list[str]
+    atlas: BrainAtlas | None = None          # set for fly policies with anatomy on
+    activity: ActivityScale | None = None
 
 
 def action_names_of(env: gym.Env) -> list[str]:
@@ -82,4 +87,8 @@ def build_session(cfg: SessionConfig) -> Session:
         if cfg.checkpoint:
             load_checkpoint(agent, cfg.checkpoint)
         policy = agent.eval()
+        if cfg.anatomy:
+            atlas = build_atlas(conn, agent.encoder, cfg.max_points)
+            activity = calibrate_activity(agent, get_suite(cfg.suite).make(cfg.game, seed=cfg.seed + 2000))
+            return Session(cfg, env, policy, action_names_of(env), atlas, activity)
     return Session(cfg, env, policy, action_names_of(env))
