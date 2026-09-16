@@ -81,3 +81,12 @@ processing stage, and the photoreceptor sampling positions. Each step event then
 rollout, 128 = resting), `brain.stages` (mean |z| per stage after every network sub-step,
 which the page animates as the signal travels from the eye to the descending neurons) and
 `brain.retina` (input current per photoreceptor). `--no-anatomy` turns this off.
+
+`scripts/fetch_anatomy.py` downloads the release's own 3-D anatomy into `<data>/anatomy`: the
+neuropil meshes of the brain and ventral nerve cord (neuroglancer legacy meshes, decimated by
+vertex clustering to a few thousand faces each, stored in micrometres in `neuropils.json`) and
+the SWC skeletons of every descending neuron (`--superclass`, `--per-stage N` and `--bodies`
+choose more). When present, the session serves them at `/api/anatomy/meshes` and
+`/api/anatomy/skeletons` (skeletons pruned to about 400 nodes, keeping root, tips and branch
+points), and the page draws the shells translucent and the skeletons as lines coloured by the
+neuron's activity, hiding the soma points of neurons that have a skeleton.

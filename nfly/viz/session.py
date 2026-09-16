@@ -14,7 +14,7 @@ from ..agent import FlyAgent
 from ..connectome import load_malecns, select_subset
 from ..rl.simple.common import load_checkpoint
 from ..suite import get_suite
-from .anatomy import ActivityScale, BrainAtlas, build_atlas, calibrate_activity
+from .anatomy import ActivityScale, AnatomyAssets, BrainAtlas, build_atlas, calibrate_activity, load_assets
 
 
 @runtime_checkable
@@ -55,6 +55,7 @@ class SessionConfig:
     fps: float = 15.0              # playback speed of the stream
     anatomy: bool = True           # stream brain activity for the 3-D view (fly policy only)
     max_points: int = 30000        # neurons rendered in the 3-D view
+    anatomy_dir: str | None = None # official meshes and skeletons (default <data_dir>/anatomy, see scripts/fetch_anatomy.py)
 
 
 @dataclasses.dataclass
@@ -65,6 +66,7 @@ class Session:
     action_names: list[str]
     atlas: BrainAtlas | None = None          # set for fly policies with anatomy on
     activity: ActivityScale | None = None
+    assets: AnatomyAssets | None = None      # official meshes and skeletons, when fetched
 
 
 def action_names_of(env: gym.Env) -> list[str]:
@@ -88,7 +90,8 @@ def build_session(cfg: SessionConfig) -> Session:
             load_checkpoint(agent, cfg.checkpoint)
         policy = agent.eval()
         if cfg.anatomy:
-            atlas = build_atlas(conn, agent.encoder, cfg.max_points)
+            assets = load_assets(cfg.anatomy_dir or f"{cfg.data_dir}/anatomy", conn)
+            atlas = build_atlas(conn, agent.encoder, cfg.max_points, keep=assets.skeleton_nodes)
             activity = calibrate_activity(agent, get_suite(cfg.suite).make(cfg.game, seed=cfg.seed + 2000))
-            return Session(cfg, env, policy, action_names_of(env), atlas, activity)
+            return Session(cfg, env, policy, action_names_of(env), atlas, activity, assets)
     return Session(cfg, env, policy, action_names_of(env))

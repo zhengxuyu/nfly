@@ -11,8 +11,8 @@
   header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
   header h1 { font-size: 16px; margin: 0; }
   header .meta { color: var(--dim); }
-  main { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(420px, 1.6fr) minmax(280px, 0.9fr); gap: 16px; padding: 16px; }
-  @media (max-width: 1200px) { main { grid-template-columns: 1fr 1fr; } main > .brain { grid-column: 1 / -1; order: -1; } }
+  main { display: grid; grid-template-columns: minmax(420px, 1.6fr) minmax(300px, 1fr) minmax(280px, 0.9fr); gap: 16px; padding: 16px; }
+  @media (max-width: 1200px) { main { grid-template-columns: 1fr 1fr; } main > .brain { grid-column: 1 / -1; } }
   @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
   .stage { display: flex; justify-content: center; align-items: center; height: 320px; }
@@ -56,6 +56,20 @@
   <span class="status" id="status"></span>
 </header>
 <main>
+  <section class="panel brain">
+    <h2>Neurons at their MaleCNS v1.0 soma positions, coloured by activity relative to rest (z-score per neuron)</h2>
+    <div class="view"><canvas id="brain"></canvas><div class="hud" id="hud">loading atlas...</div></div>
+    <div class="controls">
+      <button id="btnRotate" class="on">Auto-rotate</button>
+      <button id="btnAnatomy">Stage colours</button>
+      <button id="btnNeuropils" class="on" hidden>Neuropils</button>
+      <button id="btnSkeletons" class="on" hidden>Skeletons</button>
+      <button id="btnPoints" class="on">Somata</button>
+      <label>point size <input type="range" id="psize" min="1" max="5" step="0.5" value="2"></label>
+      <span class="note">drag to orbit, wheel to zoom</span>
+    </div>
+    <div class="legend" id="stageLegend"></div>
+  </section>
   <section class="panel">
     <h2>Observation</h2>
     <div class="stage"><canvas id="frame" width="160" height="210"></canvas></div>
@@ -74,17 +88,6 @@
     <h2 style="margin-top:14px">Compound eyes: photoreceptor input current</h2>
     <canvas id="retina" width="336" height="210"></canvas>
     <div class="note" id="retinaNote">left eye | right eye; orange = depolarising current, blue = hyperpolarising (centre-surround and temporal contrast included)</div>
-  </section>
-  <section class="panel brain">
-    <h2>Neurons at their MaleCNS v1.0 soma positions, coloured by activity relative to rest (z-score per neuron)</h2>
-    <div class="view"><canvas id="brain"></canvas><div class="hud" id="hud">loading atlas...</div></div>
-    <div class="controls">
-      <button id="btnRotate" class="on">Auto-rotate</button>
-      <button id="btnAnatomy">Stage colours</button>
-      <label>point size <input type="range" id="psize" min="1" max="5" step="0.5" value="2"></label>
-      <span class="note">drag to orbit, wheel to zoom</span>
-    </div>
-    <div class="legend" id="stageLegend"></div>
   </section>
   <aside class="panel">
     <h2>Signal propagation within one frame (mean |z| per stage)</h2>
@@ -145,7 +148,7 @@
   }
 
   // ---- 3-D brain ------------------------------------------------------------------------------
-  const brain = { ready: false };
+  const brain = { ready: false, neuropils: null, skeletons: null, skel: null, hidePointsOf: null };
   function initBrain(a) {
     const canvas = $('brain');
     if (typeof THREE === 'undefined') { $('hud').textContent = '3-D view needs three.js (CDN unreachable)'; return; }
@@ -170,8 +173,9 @@
     const points = new THREE.Points(geom, mat);
     scene.add(points);
     const stageRGB = a.colors.map(hex);
-    Object.assign(brain, { renderer, scene, camera, geom, col, mat, points, radius, stageRGB, theta: 0.6, phi: 1.2, dist: radius * 2.6, ready: true });
+    Object.assign(brain, { renderer, scene, camera, geom, col, mat, points, radius, stageRGB, theta: 0.6, phi: 1.2, dist: radius * 2.6, ready: true, centre: [cx, cy, cz] });
     paintCloud(null);
+    loadOfficial().catch(e => console.warn('official anatomy not loaded', e));
     // orbit: drag rotates, wheel zooms
     let drag = null;
     canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; state.rotate = false; $('btnRotate').classList.remove('on'); });
@@ -184,16 +188,79 @@
     requestAnimationFrame(renderBrain);
   }
 
+  // official MaleCNS anatomy: neuropil meshes as translucent shells, skeletons as lines coloured by activity
+  const toScene = (x, y, z) => [x - brain.centre[0], -(y - brain.centre[1]), z - brain.centre[2]];
+  async function loadOfficial() {
+    const m = await (await fetch('/api/anatomy/meshes')).json();
+    if (m.rois && m.rois.length) {
+      const group = new THREE.Group();
+      let faces = 0;
+      for (const roi of m.rois) {
+        const v = b64(roi.vertices, Float32Array), f = b64(roi.faces, Uint32Array), pos = new Float32Array(v.length);
+        for (let i = 0; i < v.length; i += 3) { const q = toScene(v[i], v[i + 1], v[i + 2]); pos[i] = q[0]; pos[i + 1] = q[1]; pos[i + 2] = q[2]; }
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(f, 1)); g.computeVertexNormals();
+        const colour = roi.region === 'vnc' ? 0x4f8f7f : 0x6f7fb0;
+        group.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false })));
+        faces += f.length / 3;
+      }
+      brain.scene.add(group); brain.neuropils = group; $('btnNeuropils').hidden = false;
+      brain.hudMeshes = `${m.rois.length} neuropil shells (${Math.round(faces / 1000)}k faces)`;
+    }
+    const k = await (await fetch('/api/anatomy/skeletons')).json();
+    if (k.neurons && k.neurons.length) {
+      let nseg = 0; for (const n of k.neurons) { const par = b64(n.parent, Int32Array); for (let i = 0; i < par.length; i++) if (par[i] >= 0) nseg++; }
+      const pos = new Float32Array(nseg * 6), col = new Float32Array(nseg * 6), owner = new Int32Array(nseg), atlasOf = [], stageOf = [];
+      let s = 0;
+      k.neurons.forEach((n, j) => {
+        const xyz = b64(n.xyz, Float32Array), par = b64(n.parent, Int32Array);
+        atlasOf.push(n.atlas); stageOf.push(n.stage);
+        for (let i = 0; i < par.length; i++) {
+          if (par[i] < 0) continue;
+          const a = toScene(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]), b = toScene(xyz[3 * par[i]], xyz[3 * par[i] + 1], xyz[3 * par[i] + 2]);
+          pos.set([a[0], a[1], a[2], b[0], b[1], b[2]], 6 * s); owner[s] = j; s++;
+        }
+      });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+      brain.scene.add(lines); brain.skeletons = lines; brain.skel = { col, owner, atlasOf, stageOf, n: k.neurons.length };
+      brain.hidePointsOf = new Uint8Array(state.atlas.n); for (const i of atlasOf) if (i >= 0) brain.hidePointsOf[i] = 1;
+      $('btnSkeletons').hidden = false;
+      brain.hudSkel = `${k.neurons.length} official skeletons`;
+    }
+    $('hud').innerHTML = `<b>${state.atlas.n.toLocaleString()}</b> neurons at their MaleCNS soma positions` + (brain.hudMeshes ? ` | ${brain.hudMeshes}` : '') + (brain.hudSkel ? ` | ${brain.hudSkel}` : '');
+    paintCloud(state.lastCloud);
+  }
+
+  function activityRGB(v, s, dim) {
+    const m = Math.min(1, Math.abs(v) * 1.5);
+    const r = v >= 0 ? 1.0 : 0.35, g = v >= 0 ? 0.70 : 0.76, b = v >= 0 ? 0.33 : 1.0;   // orange up, blue down
+    return [s[0] * dim * (1 - m) + r * m, s[1] * dim * (1 - m) + g * m, s[2] * dim * (1 - m) + b * m];
+  }
+
+  function paintSkeletons(u8) {
+    const k = brain.skel; if (!k) return;
+    const a = state.atlas, rgb = brain.stageRGB, colours = [];
+    for (let j = 0; j < k.n; j++) {
+      const s = rgb[k.stageOf[j]], ai = k.atlasOf[j];
+      const v = (u8 && ai >= 0) ? (u8[ai] - 128) / 127 : 0;
+      colours.push(state.anatomyMode || !u8 ? [s[0], s[1], s[2]] : activityRGB(v, s, 0.45));
+    }
+    const col = k.col;
+    for (let i = 0; i < k.owner.length; i++) { const c = colours[k.owner[i]]; col.set(c, 6 * i); col.set(c, 6 * i + 3); }
+    brain.skeletons.geometry.attributes.color.needsUpdate = true;
+  }
+
   function paintCloud(u8) {
     if (!brain.ready) return;
+    paintSkeletons(u8);
     const a = state.atlas, col = brain.col, rgb = brain.stageRGB;
+    const hide = brain.skeletons && brain.skeletons.visible ? brain.hidePointsOf : null;
     for (let i = 0; i < a.n; i++) {
       const s = rgb[a.stage[i]];
+      if (hide && hide[i]) { col[3 * i] = col[3 * i + 1] = col[3 * i + 2] = 0; continue; }
       if (state.anatomyMode || !u8) { const d = state.anatomyMode ? 1 : 0.28; col[3 * i] = s[0] * d; col[3 * i + 1] = s[1] * d; col[3 * i + 2] = s[2] * d; continue; }
-      const v = (u8[i] - 128) / 127, m = Math.min(1, Math.abs(v) * 1.5);
-      const r = v >= 0 ? 1.0 : 0.35, g = v >= 0 ? 0.70 : 0.76, b = v >= 0 ? 0.33 : 1.0;   // orange up, blue down
-      const d = 0.22;
-      col[3 * i] = s[0] * d * (1 - m) + r * m; col[3 * i + 1] = s[1] * d * (1 - m) + g * m; col[3 * i + 2] = s[2] * d * (1 - m) + b * m;
+      const c = activityRGB((u8[i] - 128) / 127, s, 0.22);
+      col[3 * i] = c[0]; col[3 * i + 1] = c[1]; col[3 * i + 2] = c[2];
     }
     brain.geom.attributes.color.needsUpdate = true;
   }
@@ -284,6 +351,9 @@
   $('fps').onchange = ev => control('fps', { fps: +ev.target.value });
   $('btnRotate').onclick = () => { state.rotate = !state.rotate; $('btnRotate').classList.toggle('on', state.rotate); };
   $('btnAnatomy').onclick = () => { state.anatomyMode = !state.anatomyMode; $('btnAnatomy').classList.toggle('on', state.anatomyMode); paintCloud(state.lastCloud); };
+  $('btnNeuropils').onclick = () => { if (!brain.neuropils) return; brain.neuropils.visible = !brain.neuropils.visible; $('btnNeuropils').classList.toggle('on', brain.neuropils.visible); };
+  $('btnSkeletons').onclick = () => { if (!brain.skeletons) return; brain.skeletons.visible = !brain.skeletons.visible; $('btnSkeletons').classList.toggle('on', brain.skeletons.visible); paintCloud(state.lastCloud); };
+  $('btnPoints').onclick = () => { if (!brain.points) return; brain.points.visible = !brain.points.visible; $('btnPoints').classList.toggle('on', brain.points.visible); };
 
   async function loadAtlas() {
     const a = await (await fetch('/api/anatomy')).json();

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import json
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -80,11 +82,15 @@ class BrainAtlas:
                 "retina_xy": _b64(self.retina_xy), "retina_eye": _b64(self.retina_eye)}
 
 
-def build_atlas(conn: Connectome, encoder, max_points: int = 30000, seed: int = 0) -> BrainAtlas:
-    """Sample up to max_points placed neurons, keeping every photoreceptor and descending neuron."""
+def build_atlas(conn: Connectome, encoder, max_points: int = 30000, seed: int = 0,
+                keep: np.ndarray | None = None) -> BrainAtlas:
+    """Sample up to max_points placed neurons, keeping every photoreceptor and descending neuron
+    and the node indices in `keep` (neurons with a skeleton)."""
     xyz, stage = neuron_positions(conn), stage_of(conn.neurons)
     placed = np.flatnonzero(~np.isnan(xyz[:, 0]))
     keep_all = np.isin(stage[placed], [STAGES.index("photoreceptors"), STAGES.index("descending")])
+    if keep is not None:
+        keep_all |= np.isin(placed, keep)
     rest = placed[~keep_all]
     rng = np.random.default_rng(seed)
     budget = max(0, max_points - int(keep_all.sum()))
@@ -169,3 +175,83 @@ def _quantise(x: torch.Tensor, full_scale: float) -> np.ndarray:
 
 def _b64(a: np.ndarray) -> str:
     return base64.b64encode(np.ascontiguousarray(a).tobytes()).decode("ascii")
+
+
+# ---- official anatomy: neuropil meshes and neuron skeletons (scripts/fetch_anatomy.py) ---------
+
+SKELETON_MAX_NODES = 400
+VOXEL_UM = 0.008             # SWC coordinates are 8 nm voxels
+
+
+@dataclasses.dataclass
+class Skeleton:
+    body: int
+    node: int                # connectome node index
+    xyz: np.ndarray          # (n, 3) float32 micrometres
+    parent: np.ndarray       # (n,) int32, -1 at the root
+
+    def to_dict(self, atlas_pos: int, stage: int) -> dict:
+        return {"body": self.body, "atlas": atlas_pos, "stage": stage, "n": int(len(self.xyz)),
+                "xyz": _b64(self.xyz), "parent": _b64(self.parent)}
+
+
+def read_swc(path: Path, max_nodes: int = SKELETON_MAX_NODES) -> tuple[np.ndarray, np.ndarray]:
+    """SWC -> (xyz in micrometres, parent index); pruned to about max_nodes keeping every root,
+    tip and branch point plus every k-th node along the chains between them."""
+    rows = np.loadtxt(path, comments="#", ndmin=2)
+    ids = rows[:, 0].astype(np.int64)
+    lut = {int(i): k for k, i in enumerate(ids)}
+    parent = np.array([lut.get(int(pid), -1) for pid in rows[:, 6]], dtype=np.int32)
+    xyz = (rows[:, 2:5] * VOXEL_UM).astype(np.float32)
+    if len(xyz) <= max_nodes:
+        return xyz, parent
+    degree = np.bincount(parent[parent >= 0], minlength=len(xyz)) + (parent >= 0)
+    stride = int(np.ceil(len(xyz) / max_nodes))
+    keep = (degree != 2) | (np.arange(len(xyz)) % stride == 0)
+    ancestor = parent.copy()                             # nearest kept ancestor of every node
+    for _ in range(stride + 1):
+        hop = (ancestor >= 0) & ~keep[np.maximum(ancestor, 0)]
+        if not hop.any():
+            break
+        ancestor[hop] = parent[ancestor[hop]]
+    new_index = np.cumsum(keep) - 1
+    kept_parent = np.where(ancestor[keep] >= 0, new_index[np.maximum(ancestor[keep], 0)], -1).astype(np.int32)
+    return xyz[keep], kept_parent
+
+
+@dataclasses.dataclass
+class AnatomyAssets:
+    """Official meshes and skeletons found under <data>/anatomy, or empty when not fetched."""
+    neuropils: list[dict]              # entries of neuropils.json (already base64)
+    skeletons: list[Skeleton]
+
+    @property
+    def skeleton_nodes(self) -> np.ndarray:
+        return np.array([s.node for s in self.skeletons], dtype=np.int64)
+
+    def meshes_dict(self) -> dict:
+        return {"units": "um", "rois": self.neuropils}
+
+    def skeletons_dict(self, atlas: BrainAtlas) -> dict:
+        """Skeletons with their position in the atlas sample (-1 if the neuron could not be placed)."""
+        pos = {int(n): i for i, n in enumerate(atlas.index)}
+        out = []
+        for s in self.skeletons:
+            i = pos.get(s.node, -1)
+            out.append(s.to_dict(i, int(atlas.stage[i]) if i >= 0 else len(STAGES) - 1))
+        return {"units": "um", "neurons": out}
+
+
+def load_assets(anatomy_dir: str | Path, conn: Connectome) -> AnatomyAssets:
+    anatomy_dir = Path(anatomy_dir)
+    meshes = anatomy_dir / "neuropils.json"
+    neuropils = json.loads(meshes.read_text())["rois"] if meshes.exists() else []
+    lut = {int(b): i for i, b in enumerate(conn.root_ids)}
+    skeletons = []
+    for swc in sorted((anatomy_dir / "skeletons").glob("*.swc")) if (anatomy_dir / "skeletons").exists() else []:
+        node = lut.get(int(swc.stem))
+        if node is None:                                 # a neuron outside this sub-network
+            continue
+        xyz, parent = read_swc(swc)
+        skeletons.append(Skeleton(int(swc.stem), node, xyz, parent))
+    return AnatomyAssets(neuropils, skeletons)
