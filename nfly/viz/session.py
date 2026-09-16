@@ -47,6 +47,8 @@ class SessionConfig:
     subset: str = "visual"
     min_syn: int = 3
     rnn_steps: int = 4
+    readout_dim: int | None = None # must match the checkpoint's agent (None = default, 0 = no bottleneck)
+    head_hidden: int = 0           # 0 = linear policy head, else tanh MLP width (must match the checkpoint)
     checkpoint: str | None = None
     policy: str = "fly"            # fly | random
     greedy: bool = False
@@ -84,7 +86,8 @@ def build_session(cfg: SessionConfig) -> Session:
         policy: Policy = RandomPolicy(env.action_space)
     else:
         conn = select_subset(load_malecns(cfg.data_dir, min_syn=cfg.min_syn), cfg.subset)
-        agent = FlyAgent.build(conn, env.observation_space, env.action_space, rnn_steps=cfg.rnn_steps).to(cfg.device)
+        agent = FlyAgent.build(conn, env.observation_space, env.action_space, rnn_steps=cfg.rnn_steps,
+                               readout_dim=cfg.readout_dim, head_hidden=cfg.head_hidden).to(cfg.device)
         agent.calibrate_on_env(get_suite(cfg.suite).make(cfg.game, seed=cfg.seed + 1000))
         if cfg.checkpoint:
             load_checkpoint(agent, cfg.checkpoint)
