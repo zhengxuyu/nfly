@@ -395,6 +395,15 @@ to 200 leaves the statistics unchanged to four digits: photoreceptors are inhibi
 lamina neurons resting at 0.1, so beyond a little light they are silenced and the signal
 amplitude is capped by the resting level, then decays through the layers.
 
+Without the floor (`min_std` 1e-12), the true spread of a descending neuron over a random
+rollout is 1.6e-6 (median; 1st to 99th percentile 8e-8 to 4e-5), 1.7e-5 of its resting level.
+The floor therefore compresses the features about 60-fold below unit variance, and the head
+undoes that with large weights, which is the same sensitivity seen from the other side. The
+global synaptic scale is not a clean lever: at 1.5 some neurons already sit at the activity
+ceiling `h_max` = 10, and at 4.0 half the descending neurons are still at the floor while their
+median resting level has fallen from 0.107 to 0.020. Runaway subcircuits saturate before the
+visual signal grows.
+
 **Consequence for the earlier rows.** Every RL run since v2 had these parameters drifting at
 lr 1e-3 under a zero-initialised head, where the drift is invisible in KL but still moves the
 features the head is trying to read. That is a candidate cause for the CartPole take-off
