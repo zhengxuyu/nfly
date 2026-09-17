@@ -206,6 +206,9 @@ statistically indistinguishable from noise (ablation, section 16).
 - Motor-neuron readout on the whole CNS, so the ventral nerve cord supplies the nonlinearity
   between descending and motor neurons and the head stays linear.
 - A classification recipe alongside the Gym one.
+- Embodied: the Miniworld suite is the first example (the project is deprecated upstream but
+  runs); the target is [flygym / NeuroMechFly](https://neuromechfly.org/), a physics model of
+  the fly's own body with compound-eye rendering, so both brain and body are the fly's.
 - Test the potential advantages of real wiring, none of which is measured yet: sample
   efficiency (env steps to a score, fly vs an equal-parameter MLP and the CNN, from the same
   start); transfer (train on one game, measure on another, or CartPole to Pong); robustness

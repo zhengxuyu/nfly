@@ -26,7 +26,9 @@ observation normalisation.
 
 Each subpackage of `nfly.envs` wraps one simulator as a `GameSuite` and registers it on import;
 they are optional extras so the core package never imports them. `nfly.envs.miniworld`
-(`uv sync --extra embodied`) exposes Miniworld's first-person 3-D navigation tasks (hallway,
+(`uv sync --extra embodied`) exposes [Miniworld](https://github.com/Farama-Foundation/Miniworld)'s
+first-person 3-D navigation tasks (the package still installs and runs, version 2.1.0, but
+Farama deprecated the project on 2025-08-11 and its documentation site is offline) (hallway,
 oneroom, tmaze, fourrooms, maze, collect, sidewalk, putnext) as 84 x 84 grayscale frames with
 a change channel, the Atari suite's format, so the retina, readout and trainers apply
 unchanged. `scripts/play.py`, `train_rl.py` and `serve.py` import it when `--suite miniworld`
