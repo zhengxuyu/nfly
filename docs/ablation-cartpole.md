@@ -532,7 +532,29 @@ frozen, v9 settings, 16 envs:
 Sharing the trunk does not make the critic learn on the frozen readout; the value gradient only
 disturbs the policy's hidden layer. The 64-unit layer on top of the readout is not enough of a
 representation for the return, which needs where the ball is heading over the next 20 to 60
-frames, not just where it is. Test of (b), the pixel critic, follows.
+frames, not just where it is.
+
+**Test of (b), first attempt.** `--critic pixels` (a two-layer CNN over the observation, value
+only) from the same head: -17.6 at update 140 with the value loss again flat at 0.03 to 0.11.
+This run had the CNN critic's dense layer under the fan-in learning-rate scaling meant for the
+readout heads (lr 2.5e-5), which is fixed; the rerun at the full rate is pending on the shared
+GPU.
+
+**Supervised controls run alongside** (DAgger, 8 rounds, 10 greedy starts):
+
+| Readout | Head | Best greedy return | Fit accuracy |
+| --- | --- | --- | --- |
+| descending neurons (`visual`) | 64-unit MLP | +13.4 (5 starts) / +10.8 (10 starts) | 85% |
+| descending neurons (`visual`) | 256-unit MLP | +8.6 | 82% |
+| descending neurons (`visual`) | linear | -18.6 | 69% |
+| descending + motor neurons (`all`, VNC included) | 64-unit MLP | +10.3 | 82% |
+| descending + motor neurons (`all`, VNC included) | linear | -19.2 | 71% |
+
+A wider head does not fix the lost starts (capacity is not the limit; 3 of 10 starts are lost
+by every head), and reading the motor neurons through the real ventral nerve cord does not make
+the policy linearly readable either: on the untrained wiring the VNC adds no useful
+nonlinearity on top of the descending neurons. The linear-head claim therefore does not hold
+on Pong with the untrained connectome; the 64-unit head stays the working configuration.
 Reward shaping (ball to paddle distance) attacks the sparsity itself. The linear head is a
 separate limit: DAgger with a linear readout stays at -19 (fit accuracy 69%), so Pong's policy
 is not linearly readable from the descending neurons; the MLP head's 64 units are needed.
