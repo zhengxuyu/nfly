@@ -3,57 +3,24 @@
 from __future__ import annotations
 
 import argparse
-from collections import deque
 import json
+import math
 from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
 import torch
 
-from scripts.bc_pong import CNNTeacher
+from nfly.rl.rllib.teacher import CNNTeacher, TeacherFrameBuffer, native_stack, teacher_frame
 from nfly.suite.atari import TemporalContrast
 
 
-def teacher_frame(rgb):
-    from ray.rllib.env.wrappers.atari_wrappers import resize, rgb2gray
-    return resize(rgb2gray(rgb), height=64, width=64).astype(np.float32) / 128.0 - 1.0
-
-
-class TeacherFrameBuffer(gym.Wrapper):
-    """Observe raw frames before the fly wrapper repeats actions and downsamples."""
-
-    def __init__(self, env):
-        super().__init__(env)
-        self.frames = deque(maxlen=2)
-
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        self.frames.clear()
-        self.frames.append(teacher_frame(obs))
-        return obs, info
-
-    def step(self, action):
-        obs, reward, term, trunc, info = self.env.step(action)
-        self.frames.append(teacher_frame(obs))
-        return obs, reward, term, trunc, info
-
-    def pooled(self):
-        return np.maximum.reduce(self.frames)
-
-
-def native_stack(history, frame):
-    """RLlib's connector pads absent normalized observations with literal zeros."""
-    history.append(frame)
-    del history[:-4]
-    return torch.stack([torch.zeros_like(frame)] * (4 - len(history)) + history, -1)[None]
-
-
 @torch.no_grad()
-def act_on_frame(teacher, frame):
+def act_on_frame(teacher, frame, temperature=0.0):
     small = torch.as_tensor(frame, device=teacher.device).float()
     obs = native_stack(teacher.stack, small)
-    return int(teacher.module.forward_inference({"obs": obs})["action_dist_inputs"][0].argmax())
+    logits = teacher.module.forward_inference({"obs": obs})["action_dist_inputs"][0]
+    return int(logits.argmax() if temperature == 0 else torch.distributions.Categorical(logits=logits / temperature).sample())
 
 
 def make_env(mode):
@@ -74,11 +41,12 @@ def make_env(mode):
     return TemporalContrast(env), frame_source
 
 
-def evaluate(teacher, mode, seeds):
+def evaluate(teacher, mode, seeds, temperature=0.0):
     env, source = make_env(mode)
     results = []
     try:
         for seed in seeds:
+            torch.manual_seed(seed)
             obs, _ = env.reset(seed=seed)
             teacher.reset()
             total = 0.0
@@ -86,8 +54,8 @@ def evaluate(teacher, mode, seeds):
                 if mode == "legacy":
                     action = teacher(env)
                 else:
-                    frame = obs[..., 0] if mode == "native" else source.pooled()
-                    action = act_on_frame(teacher, frame)
+                    frame = obs[..., 0] if mode == "native" else source.teacher_frame()
+                    action = act_on_frame(teacher, frame, temperature)
                 obs, reward, term, trunc, _ = env.step(action)
                 total += reward
                 if term or trunc:
@@ -109,15 +77,20 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--seed", type=int, default=14000)
     p.add_argument("--episodes", type=int, default=12)
+    p.add_argument("--temperature", type=float, default=0.0, help="0 is greedy; positive values sample pooled/native policies")
     p.add_argument("--modes", nargs="+", choices=["legacy", "pooled", "native"],
                    default=["legacy", "pooled", "native"])
     p.add_argument("--out", required=True)
     args = p.parse_args()
+    if not math.isfinite(args.temperature) or args.temperature < 0 or args.episodes < 1:
+        p.error("Need positive episodes and a finite nonnegative temperature")
+    if args.temperature and "legacy" in args.modes:
+        p.error("The legacy control is greedy; use --modes pooled native for sampled controls")
     args.teacher = str(Path(args.teacher).resolve())
-    teacher = CNNTeacher(args.teacher, args.device)
+    teacher = CNNTeacher(args.teacher, args.device, protocol="legacy")
     report = dict(arguments=vars(args), modes={})
     for mode in args.modes:
-        rows = evaluate(teacher, mode, range(args.seed, args.seed + args.episodes))
+        rows = evaluate(teacher, mode, range(args.seed, args.seed + args.episodes), args.temperature)
         complete = [r["score"] for r in rows if r["terminated"]]
         report["modes"][mode] = dict(episodes=rows, observed_mean=float(np.mean([r["score"] for r in rows])),
                                     complete_count=len(complete),
