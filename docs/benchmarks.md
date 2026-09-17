@@ -69,6 +69,16 @@ To add a row, run one of the training commands in the README, read the last log 
 trainers) or the last `{"iter": ...}` line (RLlib), and record the config, env steps, return
 and entropy.
 
+## Embodied (nfly.envs)
+
+First runs, recorded as they stand. Simple PPO, `visual` sub-network, 64-unit MLP head, v9
+settings, 16 env processes on the shared GPU.
+
+| Suite / task | Random policy | Fly, simple PPO | Env steps | Notes |
+| --- | --- | --- | --- | --- |
+| Miniworld hallway (reach the red box; 1 minus a time penalty on success) | 0.21 (22% of episodes succeed, 53 steps) | 0.34 mean over updates 100-270 (max 0.52), oscillating | 138k so far | above random from update 40 on, no trend since; entropy 1.1 -> 0.5 |
+| flygym approach (NeuroMechFly walks to a red ball it sees) | | | | queued: 16 env processes each hold an EGL context on the GPU and ran out of memory next to other jobs; retry with 8 |
+
 ## Compute and energy against an equal-parameter MLP
 
 `scripts/benchmark_cost.py`, Pong observation (2 x 84 x 84), batch 16 envs, unroll 32 steps
