@@ -51,8 +51,10 @@ bearing in front of the fly; reward = progress towards it, +10 on arrival). One 
 own process because MuJoCo's offscreen GL context is thread-bound.
 
 On a headless Linux server the suites switch pyglet and MuJoCo to EGL by themselves (no
-`DISPLAY`). pyglet
-also needs `libGLU` and the GLVND libraries; without root, download them into a user prefix:
+`DISPLAY`); MuJoCo's EGL works with the system libraries alone (the error it prints when a
+renderer is garbage-collected is harmless). pyglet, for Miniworld only, also needs `libGLU`
+and the GLVND libraries; without root, download them into a user prefix and set the
+library path only for Miniworld runs:
 
 ```bash
 mkdir -p ~/.local/lib/glu && cd ~/.local/lib/glu
