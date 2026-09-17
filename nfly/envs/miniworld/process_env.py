@@ -18,7 +18,10 @@ def _worker(conn, factory: Callable[[], gym.Env]) -> None:
     env = factory()
     conn.send((env.observation_space, env.action_space, env.metadata))
     while True:
-        cmd, arg = conn.recv()
+        try:
+            cmd, arg = conn.recv()
+        except EOFError:                       # the parent went away without close(): just leave
+            env.close(); break
         if cmd == "reset":
             conn.send(env.reset(**arg))
         elif cmd == "step":
@@ -51,8 +54,11 @@ class ProcessEnv(gym.Env):
         self._conn.send(("render", None))
         return self._conn.recv()
 
+    def __del__(self):
+        self.close()
+
     def close(self):
-        if self._proc.is_alive():
+        if getattr(self, "_proc", None) is not None and self._proc.is_alive():
             try:
                 self._conn.send(("close", None))
             except (BrokenPipeError, OSError):
