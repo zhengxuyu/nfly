@@ -22,6 +22,16 @@ class MySuite(GameSuite):
 `--suite mygames --game level1`. `finish` seeds the env and, for vector Box observations, adds
 observation normalisation.
 
+## Embodied simulators (`nfly/envs/`)
+
+Each subpackage of `nfly.envs` wraps one simulator as a `GameSuite` and registers it on import;
+they are optional extras so the core package never imports them. `nfly.envs.miniworld`
+(`uv sync --extra embodied`) exposes Miniworld's first-person 3-D navigation tasks (hallway,
+oneroom, tmaze, fourrooms, maze, collect, sidewalk, putnext) as 84 x 84 grayscale frames with
+a change channel, the Atari suite's format, so the retina, readout and trainers apply
+unchanged. `scripts/play.py`, `train_rl.py` and `serve.py` import it when `--suite miniworld`
+is given.
+
 ## Your own senses or muscles
 
 Subclass `ObservationEncoder` (provide `idx`, the neurons you drive, and `encode`) or

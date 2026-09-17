@@ -11,6 +11,7 @@ in the agent, because the agent is built from the env's observation/action space
 
 from __future__ import annotations
 
+import importlib
 from abc import ABC, abstractmethod
 from typing import Callable
 
@@ -29,8 +30,18 @@ def register(name: str) -> Callable[[type["GameSuite"]], type["GameSuite"]]:
 
 def get_suite(name: str, **kw) -> "GameSuite":
     if name not in _REGISTRY:
+        _import_embodied(name)                 # nfly.envs.<name> registers itself on import
+    if name not in _REGISTRY:
         raise KeyError(f"unknown suite {name!r}; available: {sorted(_REGISTRY)}")
     return _REGISTRY[name](**kw)
+
+
+def _import_embodied(name: str) -> None:
+    """Optional simulators live in nfly.envs.<name>; importing one registers its suite."""
+    try:
+        importlib.import_module(f"nfly.envs.{name}")
+    except ImportError:
+        pass
 
 
 def available_suites() -> list[str]:

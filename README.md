@@ -104,6 +104,8 @@ uv run scripts/serve.py --suite atari --game pong --subset visual --checkpoint r
 # 4. swap the task: encoders and decoders are picked from the env's spaces, no model code changes
 uv run scripts/play.py --suite classic --game cartpole
 uv run scripts/train_rl.py --algo ppo --suite gym --game LunarLander-v3
+# 5. embodied: first-person 3-D navigation (uv sync --extra embodied), same retina, same trainers
+uv run scripts/play.py --suite miniworld --game hallway
 ```
 
 Both trainers print one line per update (return, entropy, KL, timers) and save checkpoints
