@@ -103,9 +103,9 @@ uv run scripts/serve.py --suite atari --game pong --subset visual --checkpoint r
 ```
 
 <p align="center">
-  <a href="docs/assets/viewer.png?raw=true"><img src="docs/assets/viewer.gif" alt="Recorded nfly viewer: frontal and oblique MaleCNS brain views, layer controls, compound-eye input and action probabilities while a trained head plays Pong" width="1120" /></a>
+  <a href="https://raw.githubusercontent.com/zhengxuyu/nfly/main/docs/assets/viewer.png"><img src="docs/assets/viewer.gif" alt="Recorded nfly viewer: frontal and oblique MaleCNS brain views, layer controls, compound-eye input and action probabilities while a trained head plays Pong" width="1120" /></a>
   <br />
-  <em>A behaviour-cloned head plays Pong on the frozen connectome with the legacy retina: live brain activity, compound-eye input and action probabilities. <a href="docs/assets/viewer.png?raw=true">Full-size still</a>.</em>
+  <em>A behaviour-cloned head plays Pong on the frozen connectome with the legacy retina: live brain activity, compound-eye input and action probabilities. <a href="https://raw.githubusercontent.com/zhengxuyu/nfly/main/docs/assets/viewer.png">Full-size still</a>.</em>
 </p>
 
 Recording configuration and checkpoint details: [viewer capture](docs/artwork.md#viewer-capture).
