@@ -46,3 +46,28 @@ def test_mujoco_suite_state_and_pixels():
     agent = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
     assert type(agent.encoder).__name__ == "RetinaEncoder"
     env.close()
+
+
+flygym = pytest.importorskip("flygym")
+
+
+def test_flygym_suite_body_eyes_and_progress():
+    import torch
+    from nfly import FlyAgent
+    from nfly.suite import get_suite
+    from test_agent import visual_connectome
+
+    env = get_suite("flygym", isolate=False, physics_per_step=20, max_steps=10).make("approach", seed=0)
+    obs, _ = env.reset()
+    assert obs.shape == (2, 84, 84) and 0 <= obs[0].min() <= obs[0].max() <= 1
+    agent = FlyAgent.build(visual_connectome(), env.observation_space, env.action_space)
+    assert type(agent.encoder).__name__ == "RetinaEncoder" and type(agent.decoder).__name__ == "BoxDecoder"
+    a, _ = agent.act(torch.as_tensor(obs).unsqueeze(0), agent.initial_state(1))
+    obs, r, term, trunc, info = env.step(a[0])
+    assert obs.shape == (2, 84, 84) and "distance" in info
+    for _ in range(9):
+        obs, r, term, trunc, info = env.step(np.array([1.0, 1.0]))
+        if term or trunc:
+            break
+    assert trunc or term                                              # max_steps honoured
+    env.close()

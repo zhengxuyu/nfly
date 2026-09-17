@@ -34,7 +34,24 @@ a change channel, the Atari suite's format, so the retina, readout and trainers 
 unchanged. `scripts/play.py`, `train_rl.py` and `serve.py` import it when `--suite miniworld`
 is given.
 
-On a headless Linux server the suite switches pyglet to EGL by itself (no `DISPLAY`). pyglet
+`nfly.envs.mujoco` exposes Gymnasium's MuJoCo bodies (ant, halfcheetah, hopper, walker,
+humanoid, swimmer, reacher, pusher, the inverted pendulums): state observations by default
+(VectorEncoder and BoxDecoder), or `observation="pixels"` for a camera frame in the Atari
+format.
+
+`nfly.envs.flygym` puts the MaleCNS brain in NeuroMechFly's body (flygym 2, EPFL): the fly
+walks with flygym's hybrid CPG controller and the agent supplies the two descending drives
+(left, right in [-1, 1]) that steer it, the interface flygym's own turning examples use.
+Observations are the body's two eye cameras rendered by MuJoCo, grayscale, side by side, plus
+the change from the previous step, so the retina that plays Pong looks through the body's eyes
+(`observation="state"` gives joint angles, velocities, heading and the target vector instead).
+Tasks: `walk` (reward = forward progress of the thorax) and `approach` (a red ball at a random
+bearing in front of the fly; reward = progress towards it, +10 on arrival). One env step is
+100 physics steps of 0.1 ms (about 60 ms of compute on a laptop core); each env runs in its
+own process because MuJoCo's offscreen GL context is thread-bound.
+
+On a headless Linux server the suites switch pyglet and MuJoCo to EGL by themselves (no
+`DISPLAY`). pyglet
 also needs `libGLU` and the GLVND libraries; without root, download them into a user prefix:
 
 ```bash

@@ -104,8 +104,10 @@ uv run scripts/serve.py --suite atari --game pong --subset visual --checkpoint r
 # 4. swap the task: encoders and decoders are picked from the env's spaces, no model code changes
 uv run scripts/play.py --suite classic --game cartpole
 uv run scripts/train_rl.py --algo ppo --suite gym --game LunarLander-v3
-# 5. embodied: first-person 3-D navigation (uv sync --extra embodied), same retina, same trainers
-uv run scripts/play.py --suite miniworld --game hallway
+# 5. embodied (uv sync --extra embodied): the brain in NeuroMechFly's body, steering towards a target it sees
+uv run scripts/play.py --suite flygym --game approach
+uv run scripts/play.py --suite mujoco --game ant                # or a Gymnasium MuJoCo body
+uv run scripts/play.py --suite miniworld --game hallway         # or first-person 3-D navigation
 ```
 
 Both trainers print one line per update (return, entropy, KL, timers) and save checkpoints
@@ -206,9 +208,10 @@ statistically indistinguishable from noise (ablation, section 16).
 - Motor-neuron readout on the whole CNS, so the ventral nerve cord supplies the nonlinearity
   between descending and motor neurons and the head stays linear.
 - A classification recipe alongside the Gym one.
-- Embodied: the Miniworld suite is the first example (the project is deprecated upstream but
-  runs); the target is [flygym / NeuroMechFly](https://neuromechfly.org/), a physics model of
-  the fly's own body with compound-eye rendering, so both brain and body are the fly's.
+- Embodied: `nfly.envs.flygym` puts the brain in [NeuroMechFly](https://neuromechfly.org/)'s
+  body (flygym 2) with the body's own eye cameras as the observation; next are the ommatidia
+  readouts mapped onto the connectome's photoreceptors by hex coordinate, and the leg motor
+  neurons driving the joints directly instead of the CPG controller.
 - Test the potential advantages of real wiring, none of which is measured yet: sample
   efficiency (env steps to a score, fly vs an equal-parameter MLP and the CNN, from the same
   start); transfer (train on one game, measure on another, or CartPole to Pong); robustness
