@@ -25,36 +25,6 @@ from nfly.suite import get_suite
 UP, DOWN, NOOP = 2, 3, 0      # ALE Pong: RIGHT = up, LEFT = down
 
 
-class CNNTeacher:
-    """The trained CNN baseline (scripts/baseline_cnn_pong.py checkpoint) as the teacher.
-
-    It reads the raw 210x160 screen and applies RLlib's own grayscale, 64x64 resize and
-    uint8 / 128 - 1 normalisation, stacked over the last four env steps. Its own score is
-    printed so a preprocessing mismatch shows up as a bad teacher, not a bad clone."""
-
-    def __init__(self, checkpoint: str, device: str):
-        import os
-        from ray.rllib.core.rl_module.rl_module import RLModule
-        module_dir = os.path.join(checkpoint, "learner_group", "learner", "rl_module", "default_policy")
-        self.module = RLModule.from_checkpoint(module_dir).to(device).eval()
-        self.device, self.stack = device, []
-
-    def reset(self):
-        self.stack = []
-
-    def __call__(self, env) -> int:
-        from ray.rllib.env.wrappers.atari_wrappers import resize, rgb2gray
-        screen = resize(rgb2gray(env.unwrapped.ale.getScreenRGB()), height=64, width=64)
-        small = torch.as_tensor(screen, device=self.device).float() / 128.0 - 1.0
-        self.stack = (self.stack + [small])[-4:]
-        while len(self.stack) < 4:
-            self.stack.insert(0, self.stack[0])
-        obs = torch.stack(self.stack, -1)[None]                      # (1, 64, 64, 4)
-        with torch.no_grad():
-            out = self.module.forward_inference({"obs": obs})
-        return int(out["action_dist_inputs"][0].argmax())
-
-
 def teacher_action(env, dead_zone: int = 3) -> int:
     ram = env.unwrapped.ale.getRAM()
     ball_y, paddle_y = int(ram[54]), int(ram[51])
@@ -122,15 +92,20 @@ def main() -> None:
     p.add_argument("--entropy-target", type=float, default=1.0, help="rescale the fitted logits to this mean policy entropy (nats) so RL can move the head")
     p.add_argument("--episodes", type=int, default=3)
     p.add_argument("--teacher", default="heuristic", help="'heuristic' (RAM rule) or path to a baseline_cnn_pong checkpoint")
+    p.add_argument("--teacher-protocol", choices=["pooled", "legacy"], default="pooled")
     args = p.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
     conn = connectome_from_args(args)
-    env = get_suite("atari").make("pong", seed=args.seed)
+    if args.teacher == "heuristic":
+        env = get_suite("atari").make("pong", seed=args.seed)
+    else:
+        from nfly.rl.rllib.teacher import CNNTeacher, make_teacher_env
+        env = make_teacher_env(seed=args.seed, protocol=args.teacher_protocol)
     agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device).eval()
     calibrate_on(agent, get_suite("atari").make("pong", seed=args.seed + 1000))
     n_actions = env.action_space.n
-    cnn = None if args.teacher == "heuristic" else CNNTeacher(args.teacher, args.device)
+    cnn = None if args.teacher == "heuristic" else CNNTeacher(args.teacher, args.device, args.teacher_protocol)
     def teach(env, obs):
         return teacher_action(env) if cnn is None else cnn(env)
 
@@ -166,7 +141,8 @@ def main() -> None:
     print(f"cloned head on frozen fly readout: {np.mean(cloned):.1f} (episodes {cloned})", flush=True)
     print(f"cloned head, sampled actions (RL's starting policy): {np.mean(sampled):.1f} (episodes {sampled})", flush=True)
     if args.out:
-        save_checkpoint(agent, args.out, teacher=args.teacher, cloned_return=float(np.mean(cloned)))
+        save_checkpoint(agent, args.out, teacher=args.teacher, teacher_protocol=args.teacher_protocol,
+                        cloned_return=float(np.mean(cloned)))
         print(f"saved {args.out}", flush=True)
 
 

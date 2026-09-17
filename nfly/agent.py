@@ -28,9 +28,8 @@ def _is_image(space: gym.Space) -> bool:
 class PixelCritic(nn.Module):
     """A small CNN over the observation for the value function only (asymmetric actor-critic).
 
-    The actor stays the wiring plus one readout; at test time the critic is not used. It exists
-    because a critic on the frozen readout explained none of the return on Pong, which left the
-    policy gradient without a direction (ablation, section 16)."""
+    The actor stays the wiring plus one readout; at test time the critic is not used.
+    This is an optional comparison to value prediction from the brain's readout."""
 
     def __init__(self, obs_shape: tuple[int, ...]):
         super().__init__()
@@ -51,6 +50,19 @@ def value_head(n_features: int, hidden: int = 64) -> nn.Module:
     (a linear critic could not, and a linear policy with a linear critic collapsed on CartPole
     while the same policy with this critic learned as fast as an MLP policy)."""
     return nn.Sequential(nn.Linear(n_features, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, 1))
+
+
+class StandardizedCritic(nn.Module):
+    """Readout critic with fixed statistics fitted on training trajectories only."""
+
+    def __init__(self, n_features: int):
+        super().__init__()
+        self.register_buffer("mean", torch.zeros(n_features))
+        self.register_buffer("scale", torch.ones(n_features))
+        self.net = value_head(n_features)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.net((features - self.mean) / self.scale)
 
 
 COARSE_MAP = 8   # images are reconstructed as coarse frame and motion maps of this size
@@ -90,7 +102,7 @@ class FlyAgent(nn.Module):
         self.rnn_steps = rnn_steps
         self.input_gain = nn.Parameter(torch.tensor(float(input_gain)))
         self.share_trunk = share_trunk          # critic on the policy head's hidden layer, so the value loss trains it too
-        self.critic = critic                    # "readout" (default) or "pixels": PixelCritic on the observation
+        self.critic = critic
         self.obs_shape = tuple(encoder.space.shape) if hasattr(encoder, "space") else None
         self.value = self._new_value_head()
         self.register_buffer("h_rest", torch.zeros(brain.n))    # resting state; episodes start here
@@ -100,6 +112,10 @@ class FlyAgent(nn.Module):
             if self.obs_shape is None:
                 raise ValueError("critic='pixels' needs an image observation")
             return PixelCritic(self.obs_shape)
+        if self.critic == "standardized":
+            if self.share_trunk:
+                raise ValueError("The standardized critic requires the independent readout")
+            return StandardizedCritic(self.decoder.n_features)
         return value_head(self.decoder.trunk_dim if self.share_trunk else self.decoder.n_features)
 
     def _value(self, feats: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:

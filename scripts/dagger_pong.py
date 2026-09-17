@@ -23,11 +23,12 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from bc_pong import CNNTeacher, fit_head, mean_entropy, play, temper_head  # noqa: E402
+from bc_pong import fit_head, mean_entropy, play, temper_head  # noqa: E402
 
 from nfly import FlyAgent  # noqa: E402
 from nfly.cli import add_agent_args, add_connectome_args, agent_kwargs, calibrate_on, connectome_from_args  # noqa: E402
 from nfly.rl.simple.common import load_checkpoint, save_checkpoint  # noqa: E402
+from nfly.rl.rllib.teacher import CNNTeacher, make_teacher_env  # noqa: E402
 from nfly.suite import get_suite  # noqa: E402
 
 
@@ -64,17 +65,18 @@ def main() -> None:
     p.add_argument("--episodes", type=int, default=5, help="greedy evaluation episodes per round")
     p.add_argument("--entropy-target", type=float, default=1.0, help="temper the saved head's logits to this entropy for RL")
     p.add_argument("--init", help="start from the head in this checkpoint (e.g. an earlier DAgger run)")
+    p.add_argument("--teacher-protocol", choices=["pooled", "legacy"], default="pooled")
     p.add_argument("--out", required=True)
     args = p.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
     conn = connectome_from_args(args)
-    env = get_suite("atari").make("pong", seed=args.seed)
+    env = make_teacher_env(seed=args.seed, protocol=args.teacher_protocol)
     agent = FlyAgent.build(conn, env.observation_space, env.action_space, **agent_kwargs(args)).to(args.device).eval()
     calibrate_on(agent, get_suite("atari").make("pong", seed=args.seed + 1000))
     if args.init:
         load_checkpoint(agent, args.init)
-    teacher = CNNTeacher(args.teacher, args.device)
+    teacher = CNNTeacher(args.teacher, args.device, args.teacher_protocol)
     head = agent.decoder.head
     n_actions = env.action_space.n
 
@@ -97,7 +99,8 @@ def main() -> None:
     ent = mean_entropy(head, F_all)
     scale = temper_head(head, F_all, args.entropy_target)
     print(f"best greedy return {best:.1f}; logits x {scale:.3g} ({ent:.2f} -> {args.entropy_target:.2f} nats) for RL", flush=True)
-    save_checkpoint(agent, args.out, teacher=args.teacher, dagger_return=best, labelled_steps=int(len(F_all)))
+    save_checkpoint(agent, args.out, teacher=args.teacher, teacher_protocol=args.teacher_protocol,
+                    dagger_return=best, labelled_steps=int(len(F_all)))
     print(f"saved {args.out}", flush=True)
 
 

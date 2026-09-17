@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 
 import gymnasium as gym
 import ray
@@ -24,9 +25,10 @@ from ray.rllib.connectors.learner.frame_stacking import FrameStackingLearner
 from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
 from ray.rllib.env.wrappers.atari_wrappers import wrap_atari_for_new_api_stack
 from ray.tune.registry import register_env
+from nfly.rl.rllib.teacher import TeacherTrainingView, make_teacher_env
 
 
-def main() -> None:
+def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--env", default="ale_py:ALE/Pong-v5")
     p.add_argument("--env-runners", type=int, default=8)
@@ -35,11 +37,25 @@ def main() -> None:
     p.add_argument("--stop-steps", type=int, default=3_000_000)
     p.add_argument("--stop-return", type=float, default=18.0)
     p.add_argument("--out", default="runs/baseline-cnn-pong")
-    args = p.parse_args()
+    p.add_argument("--protocol", choices=["native", "fly"], default="native")
+    p.add_argument("--init", help="restore only the CNN module; keep the new environment and fresh optimizer")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--train-batch-size", type=int, default=4000)
+    p.add_argument("--minibatch-size", type=int, default=128)
+    p.add_argument("--epochs", type=int, default=10)
+    p.add_argument("--lr", type=float, default=0.00015)
+    return p.parse_args()
 
-    register_env("atari_cnn_baseline", lambda cfg: wrap_atari_for_new_api_stack(
-        gym.make(args.env, **cfg, render_mode="rgb_array"), framestack=None))
-    config = (
+
+def make_env(args, cfg):
+    if args.protocol == "fly":
+        return TeacherTrainingView(make_teacher_env(args.env))
+    return wrap_atari_for_new_api_stack(gym.make(args.env, **cfg, render_mode="rgb_array"), framestack=None)
+
+
+def build_config(args):
+    register_env("atari_cnn_baseline", lambda cfg: make_env(args, cfg))
+    return (
         PPOConfig()
         .environment("atari_cnn_baseline",
                      env_config={"frameskip": 1, "full_action_space": False, "repeat_action_probability": 0.0},
@@ -48,14 +64,17 @@ def main() -> None:
                      env_to_module_connector=lambda env, spaces, device: FrameStackingEnvToModule(num_frames=4))
         .learners(num_learners=0, num_gpus_per_learner=args.gpus)
         .training(learner_connector=lambda obs_space, act_space: FrameStackingLearner(num_frames=4),
-                  train_batch_size_per_learner=4000, minibatch_size=128, lambda_=0.95, kl_coeff=0.5,
-                  clip_param=0.1, vf_clip_param=10.0, entropy_coeff=0.01, num_epochs=10, lr=0.00015,
+                  train_batch_size_per_learner=args.train_batch_size, minibatch_size=args.minibatch_size,
+                  lambda_=0.95, kl_coeff=0.5,
+                  clip_param=0.1, vf_clip_param=10.0, entropy_coeff=0.01, num_epochs=args.epochs, lr=args.lr,
                   grad_clip=100.0, grad_clip_by="global_norm")
         .rl_module(model_config=DefaultModelConfig(conv_filters=[[16, 4, 2], [32, 4, 2], [64, 4, 2], [128, 4, 2]],
                                                    conv_activation="relu", head_fcnet_hiddens=[256], vf_share_layers=True))
+        .debugging(seed=args.seed)
     )
-    ray.init(ignore_reinit_error=True)
-    algo = config.build_algo()
+
+
+def train(algo, args):
     i = 0
     while True:
         i += 1
@@ -70,6 +89,26 @@ def main() -> None:
         if steps >= args.stop_steps or (ret is not None and ret >= args.stop_return):
             algo.save_to_path(os.path.abspath(args.out))
             break
+
+
+def main() -> None:
+    args = parse_args()
+    print("run arguments:", json.dumps(vars(args), sort_keys=True), flush=True)
+    ray.init(num_cpus=max(args.env_runners + 1, 2), object_store_memory=1024**3,
+             include_dashboard=False, ignore_reinit_error=True)
+    algo = None
+    try:
+        algo = build_config(args).build_algo()
+        if args.init:
+            component = "learner_group/learner/rl_module/default_policy"
+            source = Path(args.init).resolve() / component
+            algo.restore_from_path(str(source), component=component)
+            print(f"CNN module restored from {source}; optimizer and environment are fresh", flush=True)
+        train(algo, args)
+    finally:
+        if algo is not None:
+            algo.stop()
+        ray.shutdown()
 
 
 if __name__ == "__main__":
