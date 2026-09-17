@@ -104,6 +104,52 @@ def test_heads_only_keeps_full_feature_path_fixed_during_ppo():
     env.close()
 
 
+def test_critic_rate_is_independent_without_changing_actor_groups():
+    from nfly.rl.simple.ppo import param_groups
+    from test_agent import visual_connectome
+    from nfly import FlyAgent
+    env = vector_env()
+    agent = FlyAgent.build(visual_connectome(), env.single_observation_space, env.single_action_space)
+    before = {id(p): g["lr"] for g in param_groups(agent, 1e-4, 0.1, 64) for p in g["params"]}
+    groups = param_groups(agent, 1e-4, 0.1, 64, critic_lr=1e-3)
+    rates = {id(p): g["lr"] for g in groups for p in g["params"]}
+    value_ids = {id(p) for p in agent.value.parameters()}
+    assert len(rates) == sum(len(g["params"]) for g in groups) == len(before)
+    assert all(rate == (1e-3 if pid in value_ids else before[pid]) for pid, rate in rates.items())
+    env.close()
+
+
+def test_loading_standardized_critic_preserves_actor_and_predictions(tmp_path):
+    from nfly.cli import load_probe_critic
+    from nfly.agent import value_head
+    from test_agent import visual_connectome
+    from nfly import FlyAgent
+    env = vector_env()
+    agent = FlyAgent.build(visual_connectome(), env.single_observation_space, env.single_action_space,
+                           critic="standardized")
+    before = {k: v.clone() for k, v in agent.state_dict().items() if not k.startswith("value.")}
+    width = agent.decoder.n_features
+    fitted, x = value_head(width), torch.randn(8, width)
+    mean, scale = torch.randn(width), torch.rand(width) + 0.1
+    checkpoint = tmp_path / "critic.pt"
+    torch.save(dict(state_dict=fitted.state_dict(), input_key="standardized", gamma=0.99,
+                    feature_mean=mean, feature_scale=scale), checkpoint)
+    load_probe_critic(agent, checkpoint, gamma=0.99)
+    torch.testing.assert_close(agent.value(x), fitted((x - mean) / scale), atol=1e-6, rtol=1e-5)
+    assert all(torch.equal(v, agent.state_dict()[k]) for k, v in before.items())
+    with pytest.raises(ValueError, match="gamma"):
+        load_probe_critic(agent, checkpoint, gamma=0.95)
+    from nfly.rl.simple.common import save_checkpoint, load_checkpoint
+    restored = FlyAgent.build(visual_connectome(), env.single_observation_space, env.single_action_space,
+                              critic="standardized")
+    save_checkpoint(agent, tmp_path / "agent.pt")
+    load_checkpoint(restored, tmp_path / "agent.pt")
+    torch.testing.assert_close(restored.value(x), agent.value(x))
+    train_ppo(agent, env, PPOConfig(rollout=4, updates=1, epochs=1, critic_lr=1e-3), log=lambda _: None)
+    assert torch.equal(agent.value.mean, mean) and torch.equal(agent.value.scale, scale)
+    env.close()
+
+
 def test_exact_kl_detects_policy_change_after_optimizer_step():
     from nfly.rl.simple.common import policy_kl
     agent, env = RestingAgent(), vector_env()

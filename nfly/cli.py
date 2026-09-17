@@ -60,7 +60,7 @@ def add_agent_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--readout-dim", type=int, help="linear bottleneck width between readout neurons and heads (default: 32 for vectors, 128 for images; 0 = none)")
     p.add_argument("--heads-only", action="store_true", help="train only the policy and value heads; freeze brain, encoder and readout calibration")
     p.add_argument("--head-hidden", type=int, default=0, help="diagnostic: tanh MLP policy head of this width (0 = linear head, the default)")
-    p.add_argument("--critic", default="readout", choices=["readout", "pixels"], help="pixels: a small CNN over the observation for the value function only (training aid; the actor is unchanged)")
+    p.add_argument("--critic", default="readout", choices=["readout", "pixels", "standardized"], help="value input: brain readout, pixels, or readout with fixed training-set statistics")
     p.add_argument("--share-trunk", action="store_true", help="critic reads the policy head's hidden layer (needs --head-hidden), so the value loss also trains it")
     p.add_argument("--split-eyes", action="store_true", help="retina: each eye sees its half of the frame at double density (default: both eyes see the whole frame)")
     p.add_argument("--device", default="cpu")
@@ -82,3 +82,25 @@ def rescale_policy(agent, temperature: float) -> None:
     with torch.no_grad():
         last.weight.div_(temperature)
         last.bias.div_(temperature)
+
+
+def load_probe_critic(agent, path, gamma: float) -> None:
+    """Initialize only the value function from the fixed-policy diagnostic."""
+    import torch
+    from .agent import StandardizedCritic
+    payload = torch.load(path, map_location=agent.input_gain.device, weights_only=True)
+    if abs(payload["gamma"] - gamma) > 1e-8:
+        raise ValueError("Probe gamma differs from the training gamma")
+    key = payload["input_key"]
+    expected = {"readout": "features", "pixels": "pixels", "standardized": "standardized"}[agent.critic]
+    if key != expected or agent.share_trunk:
+        raise ValueError("Probe input does not match the independent critic architecture")
+    if isinstance(agent.value, StandardizedCritic):
+        mean, scale = payload["feature_mean"], payload["feature_scale"]
+        if not torch.isfinite(mean).all() or not torch.isfinite(scale).all() or (scale <= 0).any():
+            raise ValueError("Probe normalization must be finite with positive scales")
+        agent.value.net.load_state_dict(payload["state_dict"])
+        agent.value.mean.copy_(mean)
+        agent.value.scale.copy_(scale)
+    else:
+        agent.value.load_state_dict(payload["state_dict"])

@@ -6,6 +6,7 @@ apply the clipped surrogate objective.  Written to be read, not to be fast.
 from __future__ import annotations
 
 import dataclasses
+import math
 from pathlib import Path
 
 import torch
@@ -26,6 +27,7 @@ class PPOConfig:
     epochs: int = 10           # passes over each segment
     minibatch_envs: int = 8    # envs per minibatch (each minibatch replays the whole segment)
     lr: float = 1e-3
+    critic_lr: float | None = None  # optional absolute rate for value.* parameters only
     brain_lr_scale: float = 0.1   # multiplier on lr for parameters under `agent.brain`
     head_fan_in: int | None = 64  # head lr is scaled by head_fan_in / n_readout; None = no scaling
     gamma: float = 0.98
@@ -46,12 +48,23 @@ class PPOConfig:
     out: str | None = None
 
 
-def param_groups(agent, lr: float, brain_lr_scale: float, head_fan_in: int | None) -> list[dict]:
+def param_groups(agent, lr: float, brain_lr_scale: float, head_fan_in: int | None, critic_lr=None) -> list[dict]:
     """Ask the agent for its optimizer groups if it has an opinion (FlyAgent does), else one group."""
     if hasattr(agent, "param_groups"):
         fan_in = head_fan_in if head_fan_in is not None else agent.decoder.n_readout
-        return agent.param_groups(lr, brain_scale=brain_lr_scale, reference_fan_in=fan_in)
-    return [{"params": [q for q in agent.parameters() if q.requires_grad], "lr": lr}]
+        groups = agent.param_groups(lr, brain_scale=brain_lr_scale, reference_fan_in=fan_in)
+    else:
+        groups = [{"params": [q for q in agent.parameters() if q.requires_grad], "lr": lr}]
+    if critic_lr is None:
+        return groups
+    value_ids = {id(p) for n, p in agent.named_parameters() if n.startswith("value.")}
+    result = []
+    for group in groups:
+        for is_value in (False, True):
+            params = [p for p in group["params"] if (id(p) in value_ids) == is_value]
+            if params:
+                result.append({**group, "params": params, "lr": critic_lr if is_value else group["lr"]})
+    return result
 
 
 def optimize_rollout(agent, opt, ro, cfg, device, warmup):
@@ -105,6 +118,8 @@ def train_ppo(agent, venv, cfg: PPOConfig, device="cpu", seed: int = 0, log=None
     """Train PPO; optional evaluation runs separately from sampled training returns."""
     if min(cfg.rollout, cfg.updates, cfg.epochs, cfg.minibatch_envs, cfg.log_every, cfg.save_every) < 1 or cfg.critic_warmup < 0:
         raise ValueError("PPO counts must be positive and critic_warmup nonnegative")
+    if cfg.critic_lr is not None and (not math.isfinite(cfg.critic_lr) or cfg.critic_lr <= 0):
+        raise ValueError("critic_lr must be finite and positive")
     flags = {n: p.requires_grad for n, p in agent.named_parameters()}
     if cfg.critic_warmup and not any(flags[n] for n in flags if n.startswith("value.")):
         raise ValueError("Critic warmup requires trainable value parameters")
@@ -116,7 +131,7 @@ def train_ppo(agent, venv, cfg: PPOConfig, device="cpu", seed: int = 0, log=None
 
 
 def run_updates(agent, venv, cfg, dev, seed, log, evaluate, flags):
-    opt = torch.optim.Adam(param_groups(agent, cfg.lr, cfg.brain_lr_scale, cfg.head_fan_in), eps=1e-5)
+    opt = torch.optim.Adam(param_groups(agent, cfg.lr, cfg.brain_lr_scale, cfg.head_fan_in, cfg.critic_lr), eps=1e-5)
     for group in opt.param_groups:
         group["base_lr"] = group["lr"]
     lr_scale, best = 1.0, float("-inf")

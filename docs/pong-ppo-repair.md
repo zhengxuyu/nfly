@@ -105,3 +105,47 @@ readout MLP and the existing PixelCritic test capacity on the same targets. In t
 condition, the first readout layer receives 1e-4 * 64/1314, approximately 4.87e-6. This is an
 optimization comparison, not a matched-parameter architecture benchmark. Use `--fit-only`
 with the saved dataset to repeat fits without changing the policy or collecting new data.
+
+### Results and next training control
+
+The first 12 new starts (11000-11011) scored -2.08 on average at T=0.25; the independent
+24-start repeat (12000-12023) scored -2.42. The earlier four validation starts were favorable.
+These are sampled-policy measurements, not a new measurement of the greedy policy.
+
+The 24-episode dataset splits into 16 training, 4 validation and 4 test episodes. Fixed-target
+fits used 1000 Adam steps with batch size 256. The checkpoint with lowest validation MSE was
+tested. Readout and actor parameters remained unchanged throughout collection and fitting.
+
+| Critic input and optimizer | Validation MC EV | Test MC EV |
+| --- | --- | --- |
+| Readout, original PPO rate and fan-in scaling | 0.331 | 0.224 |
+| Readout, unscaled learning rate 1e-3 | 0.650 | 0.475 |
+| Wider readout MLP, unscaled 1e-3 | 0.658 | 0.489 |
+| Four causal readout frames, unscaled 1e-3 | 0.718 | 0.616 |
+| Readout standardized on training episodes only, unscaled 1e-3 | 0.756 | 0.621 |
+| PixelCritic, unscaled 1e-3 | 0.780 | 0.647 |
+
+The readout has usable value information. Optimization rate, conditioning and temporal input
+matter more here than simply widening the MLP. However, pooled EV partly reflects differences
+between winning and losing episodes: the standardized critic's per-test-episode EV is
+0.128, 0.034, 0.282 and 0.536, with pooled within-episode-centered EV 0.276. This does not
+establish an accurate advantage estimator or improved gameplay. The 12-episode pilot also
+failed to generalize when its validation and test splits contained only losing episodes.
+
+`--critic standardized` adds fixed training-set mean/scale to the value path only.
+`--init-critic` loads the compatible fitted value network and statistics without changing
+the actor. The new `--set critic_lr=0.001` overrides only value-parameter rates; other
+optimizer groups retain their existing rates. Statistics stay fixed during PPO and are
+included in the agent checkpoint. Training and evaluation use the same discount factor.
+
+Use the saved probe artifact with the existing recipe, adding:
+
+```bash
+--critic standardized \
+--init-critic runs/value-probe-24-expanded.readout_standardized.pt \
+--set critic_lr=0.001 --set gamma=0.99
+```
+
+This warm-start spends additional transitions on critic pretraining and is not a
+matched-total-budget comparison with the earlier PPO controls. Subsequent gameplay must
+be evaluated on fresh starts, separately from critic fitting and checkpoint selection.
