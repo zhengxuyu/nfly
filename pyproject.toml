@@ -14,6 +14,7 @@ dependencies = ["torch>=2.1", "pandas>=2.0", "numpy>=1.24", "pyarrow>=14"]
 [project.optional-dependencies]
 games = ["gymnasium>=1.0", "ale-py>=0.10", "opencv-python-headless>=4.8", "pygame>=2.5"]
 rllib = ["ray[rllib]>=2.40", "pillow>=10"]
+tracking = ["wandb>=0.24,<0.25"]
 dev = ["pytest", "gymnasium>=1.0", "ale-py>=0.10", "opencv-python-headless>=4.8", "pygame>=2.5", "ray[rllib]>=2.40", "pillow>=10"]
 
 [tool.setuptools]
