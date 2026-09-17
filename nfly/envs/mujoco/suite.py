@@ -13,14 +13,12 @@ its change), so the same retina that plays Pong watches the body move.
 
 from __future__ import annotations
 
-import os
-import sys
-
 import gymnasium as gym
 import numpy as np
 
 from ...suite.atari import TemporalContrast
 from ...suite.base import GameSuite, register
+from .. import offscreen_gl_if_no_display
 
 GAMES = {
     "ant": "Ant-v5", "halfcheetah": "HalfCheetah-v5", "hopper": "Hopper-v5", "walker": "Walker2d-v5",
@@ -57,12 +55,6 @@ def _resize(frame: np.ndarray, size: int) -> np.ndarray:
     return out
 
 
-def _offscreen_if_no_display() -> None:
-    """MuJoCo renders offscreen through EGL on a display-less Linux box; macOS uses its own GL."""
-    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
-        os.environ.setdefault("MUJOCO_GL", "egl")
-
-
 @register("mujoco")
 class MujocoSuite(GameSuite):
     """Gymnasium's MuJoCo tasks: state observations by default, or a camera frame for the retina."""
@@ -78,7 +70,7 @@ class MujocoSuite(GameSuite):
     def make(self, game, seed=None, render_mode=None, **kw):
         pixels = self.observation == "pixels"
         if pixels:
-            _offscreen_if_no_display()
+            offscreen_gl_if_no_display()
             render_mode = "rgb_array"
         env = gym.make(GAMES.get(game, game), render_mode=render_mode, **kw)
         if pixels:

@@ -12,22 +12,15 @@ pyglet's, is bound to a thread.
 
 from __future__ import annotations
 
-import os
-import sys
-
 import gymnasium as gym
 
 from ...suite.atari import TemporalContrast
 from ...suite.base import GameSuite, register
+from .. import offscreen_gl_if_no_display
 from ..miniworld.process_env import ProcessEnv
 from .env import TASKS, FlyWalkEnv
 
 GAMES = {t: t for t in TASKS}
-
-
-def _offscreen_if_no_display() -> None:
-    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
-        os.environ.setdefault("MUJOCO_GL", "egl")
 
 
 @register("flygym")
@@ -55,7 +48,7 @@ class _Factory:
         self.physics_per_step, self.max_steps, self.temporal_contrast, self.kw = physics_per_step, max_steps, temporal_contrast, kw
 
     def __call__(self) -> gym.Env:
-        _offscreen_if_no_display()
+        offscreen_gl_if_no_display()
         env = FlyWalkEnv(self.task, self.observation, self.frame_size, self.physics_per_step, self.max_steps,
                          render_mode=self.render_mode, **self.kw)
         if self.temporal_contrast:

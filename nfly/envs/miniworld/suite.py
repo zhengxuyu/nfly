@@ -15,14 +15,12 @@ the games.
 
 from __future__ import annotations
 
-import os
-import sys
-
 import gymnasium as gym
 import numpy as np
 
 from ...suite.atari import TemporalContrast
 from ...suite.base import GameSuite, register
+from .. import offscreen_gl_if_no_display
 from .process_env import ProcessEnv
 
 GAMES = {
@@ -83,13 +81,6 @@ class ActionRepeat(gym.Wrapper):
         return obs, total, term, trunc, info
 
 
-def _headless_if_no_display() -> None:
-    """On a Linux box without a display (a training server) pyglet must render through EGL;
-    it reads this variable before its first import. A desktop keeps its window context."""
-    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
-        os.environ.setdefault("PYGLET_HEADLESS", "1")
-
-
 @register("miniworld")
 class MiniworldSuite(GameSuite):
     """First-person navigation tasks from Miniworld, observed as the fly observes Atari."""
@@ -116,7 +107,7 @@ class _Factory:
         self.action_repeat, self.temporal_contrast, self.kw = action_repeat, temporal_contrast, kw
 
     def __call__(self) -> gym.Env:
-        _headless_if_no_display()
+        offscreen_gl_if_no_display()
         import miniworld  # noqa: F401  (registers the MiniWorld-* ids)
         env = gym.make(self.env_id, render_mode=self.render_mode, **self.kw)
         if self.action_repeat > 1:
