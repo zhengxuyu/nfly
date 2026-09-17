@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from nfly import FlyAgent
-from scripts.probe_value import collect_episodes, discounted_returns, split_episodes, fit_critic, FitConfig
+from scripts.probe_value import collect_episodes, discounted_returns, feature_history, split_episodes, fit_critic, FitConfig
 from test_agent import visual_connectome
 from test_simple_controls import ShortEpisode
 
@@ -22,6 +22,13 @@ def test_complete_episode_probe_fits_without_changing_actor():
     assert discounted_returns(torch.tensor([0., 1., 0., -1.]), 0.5).tolist() == [0.375, 0.75, -0.5, -1.0]
     splits = split_episodes(episodes, 0.99)
     assert [s["seeds"] for s in splits] == [[0, 1, 2, 3], [4], [5]]
+    assert torch.equal(splits[0]["history"][4], episodes[1]["features"][0].repeat(4))
+    assert feature_history(torch.tensor([[1.], [2.], [3.]]), 2).tolist() == [[1., 1.], [1., 2.], [2., 3.]]
+    heldout_changed = [dict(e) for e in episodes]
+    heldout_changed[-1]["features"] = episodes[-1]["features"] + 100
+    changed = split_episodes(heldout_changed, 0.99)
+    assert torch.equal(splits[0]["standardized"], changed[0]["standardized"])
+    assert not torch.equal(splits[-1]["standardized"], changed[-1]["standardized"])
     model = torch.nn.Linear(agent.decoder.n_features, 1)
     result = fit_critic(model, splits, "features", FitConfig(steps=100, lr=0.01, batch=16))
     assert result["selected_train"]["mse"] < result["history"][0]["train"]["mse"]

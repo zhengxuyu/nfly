@@ -485,6 +485,17 @@ then PPO from the DAgger head with a KL guard and a dense shaping reward.
 
 ## 16. Why RL fails where supervision works: the advantage is noise
 
+**Audit correction (2026-09-17).** The experiment below measured a critic loaded from a
+DAgger checkpoint whose value head had not been trained. Its low explained variance does
+not establish that a trained critic cannot use the readout. The teacher-agreement signal
+called "oracle advantage" below is an imitation control, not the Pong policy advantage;
+alignment with the teacher's cross-entropy gradient is expected by construction. Shared
+trunks and pixel critics remain hypotheses, not consequences proved by that comparison.
+The reference MLP also shares its trunk, contrary to the interpretation below. Subsequent
+controls fix recurrent resets, freeze the complete feature path, separate greedy from
+sampled evaluation, and fit critics to actual returns. See [the controlled protocol](pong-ppo-repair.md).
+The historical measurements below are retained with these limits on their interpretation.
+
 **Experiment.** `scripts/grad_align.py` at the DAgger head (section 15): 8 envs x 256 steps of
 the sampled policy (entropy 1.0), keeping readout features, actions, the critic's values,
 rewards and the CNN teacher's label per step. On 32 random minibatches of 256 the gradient on

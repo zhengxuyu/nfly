@@ -67,3 +67,41 @@ warmup held-out value metrics before interpreting actor learning. Compare a pixe
 the same data/protocol if readout value prediction remains weak. Compare rollout 32 versus
 128 with matched environment steps, then test a measured temperature intervention separately.
 Do not unfreeze the brain or normalization until this control is understood.
+
+## Completed temperature controls (2026-09-17)
+
+All three runs completed 102,400 transitions. The same four validation seeds were used
+throughout; these are neither independent temperature selection nor a final test set.
+
+| Initial temperature | Initial sampled mean | Final sampled mean | Final greedy mean | Final sampled MC value EV |
+| --- | --- | --- | --- | --- |
+| 1.0 | -12.75 | -15.00 | 10.25 | 0.0050 |
+| 0.25 | 8.25 | 8.50 | 11.50 | 0.0661 |
+| 0.1 | 10.00 | 12.00 | 10.00 | 0.0537 |
+
+No run improved on the initial greedy mean of 11.50. The losing opening persists. Lower
+temperature repairs much of the initial sampling gap without learning, but does not establish
+stable improvement from PPO. Low fitted value EV does not prove insufficient features.
+
+## Fixed-policy full-return diagnosis
+
+`scripts/probe_value.py` records complete episodes from an immutable checkpoint without actor
+updates. It fits readout and pixel critics to the same Monte Carlo targets. Whole episodes
+are split into training, validation and test sets; only validation selects the fitted model.
+Different seeds may still produce similar trajectories in deterministic Atari, so this small
+probe is a diagnostic rather than evidence of robust generalization.
+
+```bash
+PYTHONPATH=. ../nfly/.venv/bin/python scripts/probe_value.py \
+  --data ../nfly/data --suite atari --game pong --subset visual \
+  --device cuda --readout-dim 0 --head-hidden 64 --heads-only \
+  --init runs/dagger-start.pt --episodes 12 --seed 11000 --temperature 0.25 \
+  --dataset runs/value-probe-t025.pt --fit-steps 1000 \
+  --out runs/value-probe-t025.json
+```
+
+The readout MLP is fitted at the PPO optimizer rate and an unscaled higher rate. A wider
+readout MLP and the existing PixelCritic test capacity on the same targets. In the first
+condition, the first readout layer receives 1e-4 * 64/1314, approximately 4.87e-6. This is an
+optimization comparison, not a matched-parameter architecture benchmark. Use `--fit-only`
+with the saved dataset to repeat fits without changing the policy or collecting new data.

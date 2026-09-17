@@ -31,6 +31,12 @@ def discounted_returns(rewards, gamma):
     return result
 
 
+def feature_history(features, frames=4):
+    """Concatenate causal history, repeating the first observation at the boundary."""
+    index = torch.arange(len(features))[:, None] - torch.arange(frames - 1, -1, -1)[None, :]
+    return features[index.clamp_min(0)].flatten(1)
+
+
 @torch.no_grad()
 def record_step(agent, obs, h, weights, temperature):
     x = torch.as_tensor(np.asarray(obs), device=h.device)
@@ -73,9 +79,16 @@ def split_episodes(episodes, gamma):
         raise ValueError("Need at least six episodes with unique seeds")
     n = len(episodes)
     groups = (episodes[:n * 2 // 3], episodes[n * 2 // 3:n * 5 // 6], episodes[n * 5 // 6:])
-    return [{**{k: torch.cat([e[k] for e in group]) for k in ("features", "pixels")},
+    splits = [{**{k: torch.cat([e[k] for e in group]) for k in ("features", "pixels")},
+             "history": torch.cat([feature_history(e["features"]) for e in group]),
              "target": torch.cat([discounted_returns(e["reward"], gamma) for e in group]),
              "seeds": [e["seed"] for e in group]} for group in groups]
+    mean = splits[0]["features"].mean(0)
+    scale = splits[0]["features"].std(0, unbiased=False).clamp_min(1e-4)
+    for split in splits:
+        split.update(feature_mean=mean, feature_scale=scale,
+                     standardized=(split["features"] - mean) / scale)
+    return splits
 
 
 def metrics(pred, target):
@@ -151,7 +164,6 @@ def collect_data(args):
 
 def run_fits(data, args):
     splits = split_episodes(data["episodes"], args.gamma)
-    width = splits[0]["features"].shape[1]
     report = dict(checkpoint_sha256=data["checkpoint_sha256"], gamma=args.gamma,
                   collection_arguments=data["arguments"],
                   split_seeds=[s["seeds"] for s in splits], fits={},
@@ -162,12 +174,17 @@ def run_fits(data, args):
     for name, key, hidden, lr, fan in (("readout_ppo_rate", "features", 64, 1e-4, 64),
                                        ("readout_fast", "features", 64, 1e-3, None),
                                        ("readout_wide", "features", 256, 1e-3, None),
+                                       ("readout_history", "history", 64, 1e-3, None),
+                                       ("readout_standardized", "standardized", 64, 1e-3, None),
                                        ("pixels", "pixels", 0, 1e-3, None)):
         torch.manual_seed(0)
-        model = value_head(width, hidden) if hidden else PixelCritic(splits[0][key].shape[1:])
+        model = value_head(splits[0][key].shape[1], hidden) if hidden else PixelCritic(splits[0][key].shape[1:])
         print(name, flush=True)
         cfg = FitConfig(steps=args.fit_steps, lr=lr, fan_in=fan, device=args.device)
         report["fits"][name] = fit_critic(model, splits, key, cfg)
+        torch.save(dict(state_dict=model.cpu().state_dict(), input_key=key, gamma=args.gamma,
+                        feature_mean=splits[0]["feature_mean"], feature_scale=splits[0]["feature_scale"]),
+                   Path(args.out).with_suffix(f".{name}.pt"))
         Path(args.out).write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report), flush=True)
 
