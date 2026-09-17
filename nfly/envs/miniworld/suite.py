@@ -15,6 +15,9 @@ the games.
 
 from __future__ import annotations
 
+import os
+import sys
+
 import gymnasium as gym
 import numpy as np
 
@@ -79,6 +82,13 @@ class ActionRepeat(gym.Wrapper):
         return obs, total, term, trunc, info
 
 
+def _headless_if_no_display() -> None:
+    """On a Linux box without a display (a training server) pyglet must render through EGL;
+    it reads this variable before its first import. A desktop keeps its window context."""
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        os.environ.setdefault("PYGLET_HEADLESS", "1")
+
+
 @register("miniworld")
 class MiniworldSuite(GameSuite):
     """First-person navigation tasks from Miniworld, observed as the fly observes Atari."""
@@ -90,6 +100,7 @@ class MiniworldSuite(GameSuite):
         return list(GAMES)
 
     def make(self, game, seed=None, render_mode=None, **kw):
+        _headless_if_no_display()
         import miniworld  # noqa: F401  (registers the MiniWorld-* ids)
         env = gym.make(GAMES.get(game, game), render_mode=render_mode, **kw)
         if self.action_repeat > 1:

@@ -32,6 +32,16 @@ a change channel, the Atari suite's format, so the retina, readout and trainers 
 unchanged. `scripts/play.py`, `train_rl.py` and `serve.py` import it when `--suite miniworld`
 is given.
 
+On a headless Linux server the suite switches pyglet to EGL by itself (no `DISPLAY`). pyglet
+also needs `libGLU` and the GLVND libraries; without root, download them into a user prefix:
+
+```bash
+mkdir -p ~/.local/lib/glu && cd ~/.local/lib/glu
+apt-get download libglu1-mesa libopengl0 libglvnd0 libglx0 libgl1 && for d in *.deb; do dpkg-deb -x "$d" .; done
+ln -sf $PWD/usr/lib/x86_64-linux-gnu/libGLU.so.1 $PWD/usr/lib/x86_64-linux-gnu/libGLU.so
+export LD_LIBRARY_PATH=$HOME/.local/lib/glu/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+```
+
 ## Your own senses or muscles
 
 Subclass `ObservationEncoder` (provide `idx`, the neurons you drive, and `encode`) or
