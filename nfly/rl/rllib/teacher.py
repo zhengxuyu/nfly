@@ -76,3 +76,14 @@ def make_teacher_env(game="pong", seed=None, protocol="pooled"):
         raise ValueError("Unknown teacher protocol")
     wrappers = (TeacherFrameBuffer,) if protocol == "pooled" else ()
     return get_suite("atari", raw_wrappers=wrappers).make(game, seed=seed)
+
+
+class TeacherTrainingView(gym.ObservationWrapper):
+    """Train the CNN on exactly the pooled input supplied by the teacher observer."""
+
+    def __init__(self, env):
+        super().__init__(env)
+        self.observation_space = gym.spaces.Box(-1.0, 1.0, (64, 64, 1), np.float32)
+
+    def observation(self, observation):
+        return self.env.get_wrapper_attr("teacher_frame")()[..., None]

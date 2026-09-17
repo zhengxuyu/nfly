@@ -118,3 +118,17 @@ def test_teacher_observer_preserves_fly_environment():
     finally:
         plain.close()
         observed.close()
+
+
+def test_teacher_training_view_matches_inference_input():
+    from nfly.rl.rllib.teacher import TeacherTrainingView, make_teacher_env
+    env = TeacherTrainingView(make_teacher_env(seed=19))
+    try:
+        obs, _ = env.reset(seed=19)
+        assert obs.shape == (64, 64, 1) and env.observation_space.contains(obs)
+        np.testing.assert_array_equal(obs[..., 0], env.get_wrapper_attr("teacher_frame")())
+        for action in [0, 2, 3, 0]:
+            obs, *_ = env.step(action)
+            np.testing.assert_array_equal(obs[..., 0], env.get_wrapper_attr("teacher_frame")())
+    finally:
+        env.close()
