@@ -91,12 +91,11 @@ def evaluate(teacher, mode, seeds):
                 obs, reward, term, trunc, _ = env.step(action)
                 total += reward
                 if term or trunc:
-                    if trunc and not term:
-                        raise RuntimeError("Truncated teacher episode")
                     break
             else:
-                raise RuntimeError("Teacher episode reached step cap")
-            row = dict(mode=mode, seed=seed, score=total, steps=step + 1)
+                term, trunc = False, True
+            row = dict(mode=mode, seed=seed, score=total, steps=step + 1,
+                       terminated=bool(term), truncated=bool(trunc))
             results.append(row)
             print(json.dumps(row), flush=True)
     finally:
@@ -110,13 +109,19 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--seed", type=int, default=14000)
     p.add_argument("--episodes", type=int, default=12)
+    p.add_argument("--modes", nargs="+", choices=["legacy", "pooled", "native"],
+                   default=["legacy", "pooled", "native"])
     p.add_argument("--out", required=True)
     args = p.parse_args()
+    args.teacher = str(Path(args.teacher).resolve())
     teacher = CNNTeacher(args.teacher, args.device)
     report = dict(arguments=vars(args), modes={})
-    for mode in ("legacy", "pooled", "native"):
+    for mode in args.modes:
         rows = evaluate(teacher, mode, range(args.seed, args.seed + args.episodes))
-        report["modes"][mode] = dict(episodes=rows, mean=float(np.mean([r["score"] for r in rows])))
+        complete = [r["score"] for r in rows if r["terminated"]]
+        report["modes"][mode] = dict(episodes=rows, observed_mean=float(np.mean([r["score"] for r in rows])),
+                                    complete_count=len(complete),
+                                    complete_mean=float(np.mean(complete)) if complete else None)
         Path(args.out).write_text(json.dumps(report, indent=2) + "\n")
 
 

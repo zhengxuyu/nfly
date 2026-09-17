@@ -51,3 +51,16 @@ def test_teacher_pooling_and_zero_padding_end_to_end():
     assert len(buffered.frames) == 1
     buffered.close()
     native.close()
+
+
+def test_teacher_audit_marks_timeouts_as_incomplete(monkeypatch):
+    from scripts import probe_teacher
+    class Teacher:
+        def reset(self):
+            pass
+        def __call__(self, env):
+            return 0
+    monkeypatch.setattr(probe_teacher, "make_env", lambda mode: (gym.wrappers.TimeLimit(RawFrames(), 1), None))
+    rows = probe_teacher.evaluate(Teacher(), "legacy", [0, 1])
+    assert len(rows) == 2
+    assert all(r["truncated"] and not r["terminated"] and r["steps"] == 1 for r in rows)
