@@ -100,7 +100,17 @@ uv run scripts/train_rllib.py --algo APPO --suite atari --game pong --subset vis
 
 # 3. watch it play at http://127.0.0.1:8000 (frame, compound eyes, 3-D brain activity, action stream)
 uv run scripts/serve.py --suite atari --game pong --subset visual --checkpoint runs/ppo-atari-pong.pt
+```
 
+<p align="center">
+  <a href="docs/assets/viewer.png?raw=true"><img src="docs/assets/viewer.gif" alt="Recorded nfly viewer: frontal and oblique MaleCNS brain views, layer controls, compound-eye input and action probabilities while a trained head plays Pong" width="1120" /></a>
+  <br />
+  <em>A behaviour-cloned head plays Pong on the frozen connectome with the legacy retina: live brain activity, compound-eye input and action probabilities. <a href="docs/assets/viewer.png?raw=true">Full-size still</a>.</em>
+</p>
+
+Recording configuration and checkpoint details: [viewer capture](docs/artwork.md#viewer-capture).
+
+```bash
 # 4. swap the task: encoders and decoders are picked from the env's spaces, no model code changes
 uv run scripts/play.py --suite classic --game cartpole
 uv run scripts/train_rl.py --algo ppo --suite gym --game LunarLander-v3
