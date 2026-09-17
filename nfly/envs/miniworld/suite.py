@@ -23,6 +23,7 @@ import numpy as np
 
 from ...suite.atari import TemporalContrast
 from ...suite.base import GameSuite, register
+from .process_env import ProcessEnv
 
 GAMES = {
     "hallway": "MiniWorld-Hallway-v0",             # walk to the red box at the end of a corridor
@@ -93,19 +94,34 @@ def _headless_if_no_display() -> None:
 class MiniworldSuite(GameSuite):
     """First-person navigation tasks from Miniworld, observed as the fly observes Atari."""
 
-    def __init__(self, frame_size: int = 84, action_repeat: int = 4, temporal_contrast: bool = True):
-        self.frame_size, self.action_repeat, self.temporal_contrast = frame_size, action_repeat, temporal_contrast
+    def __init__(self, frame_size: int = 84, action_repeat: int = 4, temporal_contrast: bool = True, isolate: bool = True):
+        """isolate: run each env in its own process (pyglet's GL context is thread-bound and,
+        on macOS, main-thread-only; the viewer and vector envs would crash it otherwise)."""
+        self.frame_size, self.action_repeat, self.temporal_contrast, self.isolate = frame_size, action_repeat, temporal_contrast, isolate
 
     def games(self) -> list[str]:
         return list(GAMES)
 
     def make(self, game, seed=None, render_mode=None, **kw):
+        factory = _Factory(GAMES.get(game, game), render_mode, self.frame_size, self.action_repeat, self.temporal_contrast, kw)
+        env = ProcessEnv(factory) if self.isolate else factory()
+        return self.finish(env, seed)
+
+
+class _Factory:
+    """Builds the wrapped Miniworld env; picklable so a child process can call it."""
+
+    def __init__(self, env_id, render_mode, frame_size, action_repeat, temporal_contrast, kw):
+        self.env_id, self.render_mode, self.frame_size = env_id, render_mode, frame_size
+        self.action_repeat, self.temporal_contrast, self.kw = action_repeat, temporal_contrast, kw
+
+    def __call__(self) -> gym.Env:
         _headless_if_no_display()
         import miniworld  # noqa: F401  (registers the MiniWorld-* ids)
-        env = gym.make(GAMES.get(game, game), render_mode=render_mode, **kw)
+        env = gym.make(self.env_id, render_mode=self.render_mode, **self.kw)
         if self.action_repeat > 1:
             env = ActionRepeat(env, self.action_repeat)
         env = GrayFrame(env, self.frame_size)
         if self.temporal_contrast:
             env = TemporalContrast(env)
-        return self.finish(env, seed)
+        return env
